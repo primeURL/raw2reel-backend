@@ -1,0 +1,128 @@
+name: raw2reel-backend
+
+# Postgres, Redis, the FastAPI app and Celery workers, all on one VPS.
+# Queues:
+#   default -> quick jobs (DB updates, small R2 copies)
+#   media   -> heavy jobs (Instagram downloads, ffmpeg, whisper, rendering)
+# Workers use --pool=threads (same pattern as the Tendor stack).
+
+x-backend: &backend
+  build: .
+  image: raw2reel-backend:latest
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-raw2reel}:${POSTGRES_PASSWORD:-raw2reel}@postgres:5432/${POSTGRES_DB:-raw2reel}
+    REDIS_URL: redis://redis:6379/0
+    WORK_DIR: /app/work
+    MODELS_DIR: /app/models
+    HF_HOME: /app/models/hf
+  volumes:
+    - ./work:/app/work
+    - ./secrets:/app/secrets:ro
+    - models:/app/models
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-raw2reel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-raw2reel}
+      POSTGRES_DB: ${POSTGRES_DB:-raw2reel}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+
+  web:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+
+  worker-default:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - celery
+      - -A
+      - app.celery_app
+      - worker
+      - --pool=threads
+      - --queues=default
+      - --concurrency=4
+      - --hostname=default@%h
+      - --loglevel=info
+
+  worker-media:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - celery
+      - -A
+      - app.celery_app
+      - worker
+      - --pool=threads
+      - --queues=media
+      - --concurrency=2
+      - --hostname=media@%h
+      - --loglevel=info
+
+  scheduler:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - python
+      - -m
+      - app.scheduler_loop
+
+volumes:
+  pgdata:
+  redisdata:
+  models:
