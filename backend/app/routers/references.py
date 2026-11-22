@@ -109,8 +109,14 @@ def complete_upload(
     ref = _owned(reference_id, user, db)
     if ref.source != ReferenceSource.upload or ref.status != MediaStatus.pending:
         raise HTTPException(status.HTTP_409_CONFLICT, "This reference is not waiting for an upload")
-    if not storage.object_exists(ref.r2_key):
+    size = storage.object_size(ref.r2_key)
+    if size is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "File not found in storage yet - finish the upload first")
+    if size < storage.MIN_VIDEO_BYTES:
+        storage.delete_object(ref.r2_key)
+        ref.status, ref.error = MediaStatus.failed, "The upload didn't contain a video - remove it and try again"
+        db.commit()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"The upload didn't contain a video ({size} bytes) - please try again")
     _check_style_room(body.style_id, user, db)
     ref.style_id = body.style_id
     ref.status = MediaStatus.processing

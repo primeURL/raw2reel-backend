@@ -68,6 +68,17 @@ def read_bytes(key: str) -> bytes:
     return _client().get_object(Bucket=_bucket(), Key=key)["Body"].read()
 
 
+def object_size(key: str) -> int | None:
+    """Size in bytes, or None if the object isn't there."""
+    try:
+        return int(_client().head_object(Bucket=_bucket(), Key=key)["ContentLength"])
+    except ClientError:
+        return None
+
+
+MIN_VIDEO_BYTES = 1024  # anything smaller is an error page or an empty file, not a video
+
+
 def object_exists(key: str) -> bool:
     try:
         _client().head_object(Bucket=_bucket(), Key=key)

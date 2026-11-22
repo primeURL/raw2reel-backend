@@ -234,7 +234,11 @@ class RenderOut(ORM):
     duration_s: float | None
     size_bytes: int | None
     seconds_taken: float | None
+    progress: float | None = None
+    stage: str | None = None
     error: str | None
     created_at: datetime
     video_url: str | None = None
     thumbnail_url: str | None = None
+    checks: list[dict] | None = None  # quality checks of the finished reel
+    notes: list[str] | None = None  # what the renderer fixed on its own (e.g. caption moved off a face)

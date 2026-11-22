@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 W, H = 1080, 1920
 SAFE_LEFT, SAFE_RIGHT = 130, 950  # keep clear of the app's right-hand button rail
 SAFE_BOTTOM = 1330  # nothing readable below this (caption, handle, buttons)
+SAFE_TOP = 230  # the app's top bar (Reels / Following, camera)
 
 INTER = "/usr/share/fonts/opentype/inter/Inter-{}.otf"
 FALLBACKS = [
@@ -153,7 +154,8 @@ def _draw_block(img: Image.Image, lines: list[list[Run]], center_y: int, size: i
 
 def caption_png(text: str, dest: Path, *, position: str, size: str = "small", weight: str = "medium",
                 color: str = "#FFFFFF", accent: str = "#FF5A1F", highlight: str | None = None,
-                case: str = "sentence") -> Path:
+                case: str = "sentence", center_y: int | None = None) -> Path:
+    """center_y overrides the position's height (the renderer uses it to dodge a face)."""
     if case == "upper":
         text, highlight = text.upper(), (highlight.upper() if highlight else None)
     elif case == "lower":
@@ -162,7 +164,7 @@ def caption_png(text: str, dest: Path, *, position: str, size: str = "small", we
     primary = INTER.format(WEIGHTS.get(weight, "Medium"))
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     lines = _balanced(text, highlight, primary, px, _hex(color), _hex(accent), SAFE_RIGHT - SAFE_LEFT - 40)
-    _draw_block(img, lines, CENTER_Y.get(position, 1150), px)
+    _draw_block(img, lines, center_y or CENTER_Y.get(position, 1150), px)
     img.save(dest)
     return dest
 
@@ -202,3 +204,14 @@ def stats_card_png(title: str | None, items: list[tuple[str, str]], dest: Path, 
         d.ellipse([cx - 12, y1 - 12, cx + 12, y1 + 12], fill=acc)
     img.save(dest)
     return dest
+
+
+def text_sprite(text: str, size: int, *, weight: str = "ExtraBold", color: str = "#FFFFFF", shadow: int = 18,
+                max_w: int = 900) -> Image.Image:
+    """Text cut tight to its pixels (with shadow), for effects that move or scale it."""
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    primary = INTER.format(weight)
+    lines = _lines(text, None, primary, size, _hex(color), _hex(color), max_w)
+    _draw_block(img, lines, H // 2, size, shadow=shadow)
+    box = img.getchannel("A").getbbox()
+    return img.crop(box) if box else img.crop((0, 0, 1, 1))

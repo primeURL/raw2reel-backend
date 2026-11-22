@@ -153,6 +153,8 @@ class Render(TimestampMixin, Base):
     duration_s: Mapped[float | None] = mapped_column(Float)
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     seconds_taken: Mapped[float | None] = mapped_column(Float)
+    progress: Mapped[float | None] = mapped_column(Float)  # 0..1 while rendering
+    stage: Mapped[str | None] = mapped_column(String(80))  # e.g. "Cutting shot 3 of 6"
     error: Mapped[str | None] = mapped_column(Text)
 
 

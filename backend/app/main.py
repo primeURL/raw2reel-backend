@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.storage import StorageNotConfigured
-from app.routers import health, me, projects, references, styles
+from app.routers import health, me, projects, references, styles, voice
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -31,6 +31,7 @@ app.include_router(me.router, prefix="/v1")
 app.include_router(styles.router, prefix="/v1")
 app.include_router(references.router, prefix="/v1")
 app.include_router(projects.router, prefix="/v1")
+app.include_router(voice.router, prefix="/v1")
 
 
 @app.exception_handler(StorageNotConfigured)

@@ -30,6 +30,9 @@ STUCK = [
     (ReferenceVideo, ReferenceVideo.status, [MediaStatus.downloading, MediaStatus.processing], MediaStatus.failed, 20),
     (ReferenceVideo, ReferenceVideo.analysis_status, [MediaStatus.processing], MediaStatus.failed, 30),
     (Clip, Clip.status, [MediaStatus.processing], MediaStatus.failed, 20),
+    # upload link handed out but the upload never finished (app closed, connection lost)
+    (Clip, Clip.status, [MediaStatus.pending], MediaStatus.failed, 120),
+    (ReferenceVideo, ReferenceVideo.status, [MediaStatus.pending], MediaStatus.failed, 120),
     (Clip, Clip.analysis_status, [MediaStatus.processing], MediaStatus.failed, 30),
     (Style, Style.status, [StyleStatus.analyzing], StyleStatus.failed, 15),
     (Project, Project.status, [ProjectStatus.analyzing], ProjectStatus.failed, 15),

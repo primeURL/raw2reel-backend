@@ -32,6 +32,7 @@ def make_proxy(src: Path, dest: Path, max_w: int = 1080, max_h: int = 1920, fps:
     )
     _run(
         ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", vf,
+         "-threads", "2",  # several clips encode at once (MEDIA_CONCURRENCY); don't let one take every core
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
          "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
          "-movflags", "+faststart", str(dest)],
@@ -165,6 +166,30 @@ def _audio_16k(src: Path):
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg audio decode failed: {p.stderr.decode(errors='ignore')[-300:]}")
     return np.frombuffer(p.stdout, dtype=np.float32)
+
+
+_voice_model = None
+_voice_lock = threading.Lock()  # separate from clip analysis, so a voice note never waits behind a clip
+
+
+def transcribe_voice_note(src: Path, language: str | None = None) -> dict:
+    """Fast path for dictation: small model, greedy decoding. Hinglish is auto-detected."""
+    global _voice_model
+    audio = _audio_16k(src)
+    if audio.size < 16000 * 0.3 or not _has_voice(audio):
+        return {"text": "", "language": None, "has_speech": False}
+    with _voice_lock:
+        if _voice_model is None:
+            from faster_whisper import WhisperModel
+
+            s = get_settings()
+            _voice_model = WhisperModel(s.voice_whisper_model, device="cpu", compute_type="int8",
+                                        cpu_threads=s.whisper_cpu_threads, download_root=str(Path(s.models_dir) / "whisper"))
+        segments, info = _voice_model.transcribe(
+            audio, language=_LANG.get(language), beam_size=1, vad_filter=True, condition_on_previous_text=False,
+        )
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+    return {"text": text, "language": info.language if text else None, "has_speech": bool(text)}
 
 
 def transcribe(src: Path, language: str | None = None) -> dict:

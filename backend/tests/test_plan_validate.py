@@ -39,7 +39,7 @@ def test_day1_v3_plan_is_clean():
           "items": [{"label": "Distance", "value": "2.06 km"}]}],
     )
     fixed, warnings, tl = validate(p, CLIPS, STYLE)
-    assert warnings == []
+    assert warnings == [] and tl["unused_clips"] == []
     assert tl["footage_s"] == pytest.approx(17.5, abs=0.01)
     assert tl["shots"][4]["end_s"] - tl["shots"][4]["start_s"] == pytest.approx(3.0, abs=0.01)
     # the stats card runs after the footage -> last frame held for 5.5 s under it
@@ -117,3 +117,54 @@ def test_caption_over_tight_shot_moves_up():
     p = plan([shot("C1", 0, 3), shot("C3", 0, 3, zoom_from=1.6, zoom_to=1.8)], [cap("Wide.", 0.5, 2.5), cap("1.5 km done.", 3.5, 5.5)])
     fixed, warnings, _ = validate(p, CLIPS, STYLE)
     assert [c.position for c in fixed.captions] == ["lower_middle", "upper_third"]
+
+
+def test_unused_clips_reported():
+    _, warnings, tl = validate(plan([shot("C1", 0, 3), shot("C3", 0, 2)]), CLIPS)
+    assert tl["unused_clips"] == ["C2", "C4"]
+    assert sum("isn't used" in w for w in warnings) == 2
+
+
+# step 1 upgrades: cuts between words, effects -------------------------------------------
+
+
+def test_cut_inside_a_word_moves_to_the_gap():
+    words = [(0.5, 0.9), (1.0, 1.4), (2.0, 2.6)]  # "so" "today" ... "ran"
+    clips = {"C1": ClipInfo("C1", 5.0, words)}
+    p, warnings, _ = validate(plan([shot("C1", 1.2, 2.3, keep_audio=True)]), clips, None)
+    assert (p.shots[0].in_s, p.shots[0].out_s) == (pytest.approx(0.94), pytest.approx(2.72))
+    assert any("chop a word" in w for w in warnings)
+
+
+def test_silent_shot_is_not_snapped_to_words():
+    clips = {"C1": ClipInfo("C1", 5.0, [(1.0, 1.4)])}
+    p, _, _ = validate(plan([shot("C1", 1.2, 3.0)]), clips, None)
+    assert p.shots[0].in_s == 1.2
+
+
+def fx_plan(effects):
+    p = plan([shot("C1", 0, 6), shot("C2", 0, 6)])
+    return EditPlan.model_validate({**p.model_dump(), "effects": effects})
+
+
+def test_effects_are_cleaned_up():
+    p, warnings, _ = validate(fx_plan([
+        {"type": "punch_in", "start_s": 1.0, "end_s": 1.1, "text": "x", "look": "bw"},  # too short, stray fields
+        {"type": "slow_push", "start_s": 1.2, "end_s": 4.0},  # starts inside the punch-in: removed
+        {"type": "grade", "start_s": 5.0, "end_s": 9.0},  # no look -> moody
+        {"type": "freeze_frame", "start_s": 6.0, "end_s": 9.5, "text": "  that's   me  "},  # 3 s max
+        {"type": "flash", "start_s": 11.95, "end_s": 12.0},  # no room before the end
+    ]), CLIPS, None)
+    kinds = [(e.type, e.start_s, e.end_s) for e in p.effects]
+    assert kinds == [("punch_in", 1.0, 1.4), ("grade", 5.0, 9.0), ("freeze_frame", 6.0, 9.0)]
+    assert p.effects[0].text is None and p.effects[0].look is None
+    assert p.effects[1].look == "moody"
+    assert p.effects[2].text == "that's me"
+    assert any("overlaps another zoom" in w for w in warnings)
+    assert any("no room" in w for w in warnings)
+
+
+def test_plans_saved_before_effects_still_load():
+    old = plan([shot("C1", 0, 3)]).model_dump()
+    old.pop("effects")
+    assert EditPlan.model_validate(old).effects == []

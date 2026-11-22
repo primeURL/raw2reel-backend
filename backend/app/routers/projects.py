@@ -36,7 +36,7 @@ from app.schemas import (
 )
 from app.services.ai_usage import require_quota
 from app.services.plan_schema import EditPlan
-from app.services.plan_validate import ClipInfo, PlanError, validate
+from app.services.plan_validate import ClipInfo, PlanError, clip_words, validate
 from app.tasks.analysis import analyze_clip
 from app.tasks.clips import process_clip
 
@@ -233,8 +233,16 @@ def complete_clip_upload(
     clip = _owned_clip(project, clip_id, db)
     if clip.status != MediaStatus.pending:
         raise HTTPException(status.HTTP_409_CONFLICT, "This clip is not waiting for an upload")
-    if not storage.object_exists(clip.r2_key):
+    size = storage.object_size(clip.r2_key)
+    if size is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "File not found in storage yet - finish the upload first")
+    if size < storage.MIN_VIDEO_BYTES:
+        storage.delete_object(clip.r2_key)
+        # mark it failed (not left "pending"), so the app shows why and offers Remove
+        clip.status = MediaStatus.failed
+        clip.error = "The upload didn't contain a video - remove it and add the clip again"
+        db.commit()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"The upload didn't contain a video ({size} bytes) - please try again")
     clip.status = MediaStatus.processing
     db.commit()
     process_clip.delay(str(clip.id))
@@ -342,7 +350,7 @@ def save_plan(
     project = _owned_project(project_id, user, db, with_clips=True)
     _require_editable(project)
     clips = sorted(project.clips, key=lambda c: c.position)
-    infos = {f"C{i}": ClipInfo(f"C{i}", c.duration_s or 0) for i, c in enumerate(clips, start=1) if c.status == MediaStatus.ready}
+    infos = {f"C{i}": ClipInfo(f"C{i}", c.duration_s or 0, clip_words(c.analysis)) for i, c in enumerate(clips, start=1) if c.status == MediaStatus.ready}
     style = db.get(Style, project.style_id) if project.style_id else None
     try:
         plan, warnings, timeline = validate(body, infos, style.profile if style is not None else None)
@@ -370,6 +378,8 @@ def _render_out(r: Render) -> RenderOut:
         out.video_url = storage.presign_get(r.r2_key)
     if r.thumbnail_key:
         out.thumbnail_url = storage.presign_get(r.thumbnail_key)
+    if r.status == MediaStatus.ready and isinstance(r.plan, dict):
+        out.checks, out.notes = r.plan.get("_checks"), r.plan.get("_notes")
     return out
 
 

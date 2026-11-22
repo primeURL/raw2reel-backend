@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     whisper_model: str = "large-v3-turbo"
     whisper_compute_type: str = "int8"
     whisper_cpu_threads: int = 4
+    # Voice notes (speak your script) want speed over the last bit of accuracy: ~6 s vs ~25 s
+    voice_whisper_model: str = "small"
     models_dir: str = "/app/models"
 
     anthropic_api_key: str = ""

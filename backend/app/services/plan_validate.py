@@ -6,7 +6,7 @@ raise PlanError.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.services.plan_schema import EditPlan
 
@@ -24,6 +24,32 @@ class PlanError(ValueError):
 class ClipInfo:
     alias: str
     duration_s: float
+    words: list[tuple[float, float]] = field(default_factory=list)  # spoken words (start, end) in the clip
+
+
+def clip_words(analysis: dict | None) -> list[tuple[float, float]]:
+    """Word timings from a clip's analysis, for cutting between words instead of through them."""
+    segs = ((analysis or {}).get("transcript") or {}).get("segments") or []
+    return [(w["start"], w["end"]) for s in segs for w in s.get("words") or [] if w.get("end", 0) > w.get("start", 0)]
+
+
+WORD_PAD_IN, WORD_PAD_OUT = 0.06, 0.12  # breathing room before the first and after the last word
+
+
+def _snap_cut(t: float, words: list[tuple[float, float]], side: str) -> float:
+    """If a cut lands inside a spoken word, move it to just before (in) / after (out) that word."""
+    for ws, we in words:
+        if ws < t < we:
+            return ws - WORD_PAD_IN if side == "in" else we + WORD_PAD_OUT
+    return t
+
+
+# Effects: (shortest, longest) seconds, and which ones move the picture (never two at once)
+EFFECT_LIMITS = {
+    "punch_in": (0.4, 3.0), "slow_push": (1.5, 8.0), "spotlight": (0.8, 5.0), "grade": (0.5, MAX_REEL_S),
+    "freeze_frame": (0.6, 3.0), "flash": (0.1, 0.6), "countdown": (1.2, 4.0),
+}
+CAMERA_FX = {"punch_in", "slow_push", "freeze_frame"}
 
 
 def readable_s(text: str) -> float:
@@ -77,6 +103,12 @@ def validate(plan: EditPlan, clips: dict[str, ClipInfo], style: dict | None = No
         out_s = _clamp(s.out_s, 0.0, clip.duration_s)
         if (in_s, out_s) != (s.in_s, s.out_s):
             warnings.append(f"Shot {i}: trimmed to the clip's length ({clip.duration_s:.2f}s)")
+        if s.keep_audio and clip.words:
+            new_in = _clamp(_snap_cut(in_s, clip.words, "in"), 0.0, clip.duration_s)
+            new_out = _clamp(_snap_cut(out_s, clip.words, "out"), 0.0, clip.duration_s)
+            if (new_in, new_out) != (in_s, out_s):
+                warnings.append(f"Shot {i}: cut moved so it doesn't chop a word")
+                in_s, out_s = new_in, new_out
         if out_s - in_s < MIN_SHOT_S:
             warnings.append(f"Shot {i}: shorter than {MIN_SHOT_S}s, removed")
             continue
@@ -175,6 +207,42 @@ def validate(plan: EditPlan, clips: dict[str, ClipInfo], style: dict | None = No
                 if _norm(c.text) and (_norm(c.text) in t or t in _norm(c.text)):
                     warnings.append(f"Title {o.title!r} repeats caption {c.text!r} at the same time")
 
+    # effects ---------------------------------------------------------------------
+    fxs, camera_until = [], -1.0
+    for e in sorted(plan.effects, key=lambda e: e.start_s):
+        lo, hi = EFFECT_LIMITS.get(e.type, (0.3, 5.0))
+        name = e.type.replace("_", " ")
+        e.start_s = round(_clamp(e.start_s, 0.0, footage), 3)  # effects work on footage, not the held tail
+        e.end_s = round(_clamp(e.end_s, 0.0, footage), 3)
+        if e.end_s - e.start_s < lo:
+            if e.start_s + lo <= footage:
+                e.end_s = round(e.start_s + lo, 3)
+                warnings.append(f"Effect {name} at {e.start_s:.1f}s: too short, lengthened to {lo:.1f}s")
+            else:
+                warnings.append(f"Effect {name} at {e.start_s:.1f}s: no room before the end, removed")
+                continue
+        if e.end_s - e.start_s > hi:
+            e.end_s = round(e.start_s + hi, 3)
+            warnings.append(f"Effect {name} at {e.start_s:.1f}s: shortened to {hi:.1f}s")
+        if e.type in CAMERA_FX:
+            if e.start_s < camera_until:
+                warnings.append(f"Effect {name} at {e.start_s:.1f}s: overlaps another zoom/freeze, removed")
+                continue
+            camera_until = e.end_s
+        if e.type == "grade" and not e.look:
+            e.look = "moody"
+        if e.type != "grade":
+            e.look = None
+        e.text = (" ".join((e.text or "").split())[:40] or None) if e.type == "freeze_frame" else None
+        fxs.append(e)
+    plan.effects = fxs
+
     plan.end_fade_s = round(_clamp(plan.end_fade_s, 0.0, 1.5), 2)
 
-    return plan, warnings, {"total_s": total, "footage_s": footage, "tail_hold_s": round(tail, 3), "shots": timeline}
+    used = {s.clip for s in plan.shots}
+    unused = [a for a in clips if a not in used]
+    for a in unused:
+        warnings.append(f"Clip {a} isn't used in this edit - add it in the editor if you want it")
+
+    return plan, warnings, {"total_s": total, "footage_s": footage, "tail_hold_s": round(tail, 3), "shots": timeline,
+                            "unused_clips": unused}

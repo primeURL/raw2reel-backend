@@ -2,10 +2,13 @@
 
 import logging
 import shutil
+import threading
 import statistics
 import time
 import uuid
 from pathlib import Path
+
+from celery.signals import worker_ready
 
 from app import storage
 from app.celery_app import celery
@@ -15,6 +18,25 @@ from app.models import Clip, MediaStatus, Project, ReferenceVideo
 from app.services import analysis as A
 
 log = logging.getLogger(__name__)
+
+
+@worker_ready.connect
+def _warm_whisper(sender=None, **_):
+    """Load Whisper (~40 s) when the media worker starts, not on the first voice note / clip.
+    Only the media worker: the default worker never transcribes and shouldn't hold 1.6 GB."""
+    if str(getattr(sender, "hostname", "")).startswith("media@"):
+        threading.Thread(target=A._whisper, name="whisper-warmup", daemon=True).start()
+        threading.Thread(target=_warm_voice, name="voice-warmup", daemon=True).start()
+
+
+def _warm_voice() -> None:
+    with A._voice_lock:
+        if A._voice_model is None:
+            from faster_whisper import WhisperModel
+
+            s = get_settings()
+            A._voice_model = WhisperModel(s.voice_whisper_model, device="cpu", compute_type="int8",
+                                          cpu_threads=s.whisper_cpu_threads, download_root=str(Path(s.models_dir) / "whisper"))
 
 
 class _Timer:
@@ -154,3 +176,13 @@ def analyze_reference(reference_id: str) -> str:
         return "failed"
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+@celery.task(name="app.tasks.analysis.transcribe_note")
+def transcribe_note(path: str, language: str | None) -> dict:
+    """Voice note -> text for the script field. Runs here because this worker holds the Whisper model."""
+    src = Path(path)
+    try:
+        return A.transcribe_voice_note(src, language)
+    finally:
+        src.unlink(missing_ok=True)

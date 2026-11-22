@@ -19,6 +19,7 @@ yt-dlp
 instaloader==4.14.1
 
 httpx==0.28.1
+python-multipart==0.0.20  # file uploads to the API (voice notes)
 
 # Analysis: speech-to-text with word timings
 faster-whisper==1.1.1
@@ -26,6 +27,9 @@ faster-whisper==1.1.1
 # Rendering: captions / cards drawn as images, glyph fallback
 pillow==11.2.1
 fonttools==4.57.0
+
+# Face tracking for effects and keeping captions off faces (YuNet model in app/assets/models)
+opencv-python-headless==4.11.0.86
 
 # Claude: style analysis + edit plans
 anthropic==2.10.0

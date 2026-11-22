@@ -8,7 +8,7 @@ from app.celery_app import celery
 from app.db import session_scope
 from app.models import MediaStatus, Project, ProjectStatus, Style, StyleStatus
 from app.services import ai_usage, plan_ai
-from app.services.plan_validate import ClipInfo, PlanError, validate
+from app.services.plan_validate import ClipInfo, PlanError, clip_words, validate
 from app.services.style_ai import StyleAIError
 
 log = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def write_plan(project_id: str) -> str:
         ]
         plan, usage = plan_ai.write_plan(inputs, profile, *brief)
         ai_usage.record(user_id, "edit_plan", usage)
-        clips = {alias: ClipInfo(alias, duration) for alias, _, duration, _, _ in snapshot}
+        clips = {alias: ClipInfo(alias, duration, clip_words(a)) for alias, _, duration, _, a in snapshot}
         plan, warnings, timeline = validate(plan, clips, profile)
     except StyleAIError as exc:
         return _fail(project_id, str(exc))

@@ -108,7 +108,7 @@ services:
       - worker
       - --pool=threads
       - --queues=media
-      - --concurrency=2
+      - --concurrency=${MEDIA_CONCURRENCY:-3}
       - --hostname=media@%h
       - --loglevel=info
 

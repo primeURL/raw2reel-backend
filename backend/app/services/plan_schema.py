@@ -47,6 +47,27 @@ class Overlay(BaseModel):
     items: list[StatItem] = Field(description="stats card rows, only from facts the user gave; empty for a title")
 
 
+EffectType = Literal["punch_in", "slow_push", "spotlight", "grade", "freeze_frame", "flash", "countdown"]
+Look = Literal["moody", "bw", "warm", "cool", "pop"]
+
+
+class Effect(BaseModel):
+    """A moment of motion on the final timeline. Effects that zoom or light follow the face."""
+
+    type: EffectType = Field(description=(
+        "punch_in: quick zoom onto the face on one key word (0.6-2 s); "
+        "slow_push: slow cinematic push in (2-6 s); "
+        "spotlight: everything but the person goes dark (1-4 s); "
+        "grade: colour look over a stretch (any length, needs look); "
+        "freeze_frame: picture freezes with a label and an arrow at the person, sound keeps playing (1-2.5 s); "
+        "flash: white flash to accent a cut or a beat (0.15-0.5 s); "
+        "countdown: big 3-2-1 above the person (1.5-3 s)"))
+    start_s: float = Field(description="seconds on the final reel")
+    end_s: float
+    text: str | None = Field(default=None, description="freeze_frame label (2-4 words); null for the others")
+    look: Look | None = Field(default=None, description="grade only: moody, bw, warm, cool or pop; else null")
+
+
 class Music(BaseModel):
     enabled: bool
     mood: str
@@ -59,5 +80,13 @@ class EditPlan(BaseModel):
     shots: list[Shot]
     captions: list[Caption]
     overlays: list[Overlay]
+    effects: list[Effect] = Field(default_factory=list, description="a few effects on key moments; [] for a calm edit")
     music: Music
     end_fade_s: float = Field(description="fade to black/silence at the end, 0-1.5 s")
+
+
+class AIEditPlan(EditPlan):
+    """What Claude must write: same plan, but effects is required (it may be [] for a calm edit),
+    so the model decides about effects instead of skipping an optional field."""
+
+    effects: list[Effect] = Field(description="a few effects on key moments; [] for a calm edit")
