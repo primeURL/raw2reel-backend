@@ -11,6 +11,7 @@ copied, so a freeze_frame stills the picture while the voice keeps going.
   freeze_frame  the picture holds, a label and a drawn arrow point at the person
   flash         a white flash
   countdown     a big 3-2-1 above the person
+  backdrop_word a giant word drops in BEHIND the person (person cut-out, see segment.py)
 """
 
 import logging
@@ -26,6 +27,8 @@ from PIL import Image, ImageDraw
 from app.services import graphics
 from app.services.faces import FaceTrack
 from app.services.plan_schema import Effect
+from app.services.motion import MOTION_TYPES
+from app.services.segment import PersonMasker
 
 log = logging.getLogger(__name__)
 
@@ -133,11 +136,15 @@ def _sprite(im: Image.Image, scale: float) -> np.ndarray:
 
 
 class _Renderer:
-    def __init__(self, effects: list[Effect], faces: FaceTrack, w: int, h: int, fps: int, accent: str):
+    def __init__(self, effects: list[Effect], faces: FaceTrack, w: int, h: int, fps: int, accent: str,
+                 motion_frames: dict | None = None):
         self.fx, self.faces, self.w, self.h, self.fps = effects, faces, w, h, fps
+        self.motion_frames = motion_frames or {}
         self.k = w / graphics.W  # sprites are designed at 1080 wide
         self.accent = accent
         self.cache: dict = {}
+        self.masker: PersonMasker | None = None
+        self.mask_t = -1.0
 
     def face(self, t: float) -> tuple[float, float, float]:
         return self.faces.at(t) or (self.w / 2, self.h * 0.36, self.w * 0.2)
@@ -152,11 +159,32 @@ class _Renderer:
 
     # per frame
     def frame(self, img: np.ndarray, t: float, active: list[Effect]) -> np.ndarray:
-        order = {"freeze_frame": 0, "punch_in": 1, "slow_push": 1, "grade": 2, "spotlight": 3, "countdown": 4, "flash": 5}
-        for e in sorted(active, key=lambda e: order.get(e.type, 9)):
+        order = {"freeze_frame": 0, "punch_in": 1, "slow_push": 1, "grade": 2, "backdrop_word": 3, "spotlight": 4,
+                 "countdown": 5, "flash": 7}
+        for e in sorted(active, key=lambda e: order.get(e.type, 6)):  # motion graphics: under the flash
             lt, d = t - e.start_s, max(e.end_s - e.start_s, 0.05)
-            img = getattr(self, e.type)(img, e, lt, d, t)
+            img = (self.motion if e.type in MOTION_TYPES else getattr(self, e.type))(img, e, lt, d, t)
         return img
+
+    def motion(self, img, e, lt, d, t):
+        """A motion graphic's frame (pre-rendered RGBA) over the picture, or behind the person."""
+        frames = self.motion_frames.get(id(e))
+        if frames is None:
+            return img
+        layer = cv2.imread(str(frames.at(lt)), cv2.IMREAD_UNCHANGED)
+        if layer is None or layer.ndim != 3 or layer.shape[2] != 4:
+            return img
+        if layer.shape[:2] != (self.h, self.w):
+            layer = cv2.resize(layer, (self.w, self.h), interpolation=cv2.INTER_AREA)
+        a = layer[:, :, 3:4].astype(np.float32) / 255.0
+        if not a.any():
+            return img
+        rgb = layer[:, :, 2::-1].astype(np.float32)  # BGRA -> RGB
+        out = img.astype(np.float32) * (1 - a) + rgb * a
+        if e.behind:
+            m = self.person_mask(img, t)[:, :, None]
+            out = out * (1 - m) + img.astype(np.float32) * m
+        return (out + 0.5).astype(np.uint8)
 
     def punch_in(self, img, e, lt, d, t):
         cx, cy, fw = self.steady_face(e)
@@ -207,6 +235,37 @@ class _Renderer:
         _paste(img, spr, int(cx - spr.shape[1] / 2), int(y), alpha)
         return img
 
+    def person_mask(self, img: np.ndarray, t: float) -> np.ndarray:
+        if self.masker is None:
+            self.masker = PersonMasker(self.w, self.h)
+        if t - self.mask_t > 1.5 / self.fps:  # a gap since the last masked frame: no stale smoothing
+            self.masker.reset()
+        self.mask_t = t
+        return self.masker(img)
+
+    def backdrop_word(self, img, e, lt, d, t):
+        """Giant word behind the person: draw it on the frame, then put the person back on top."""
+        key = ("word", id(e))
+        if key not in self.cache:
+            word = (e.text or "").upper()
+            spr = graphics.text_sprite(word, 300, color="#FFFFFF", shadow=24, max_w=1000)
+            fit = min(self.w * 0.94 / spr.width, self.h * 0.3 / spr.height)
+            self.cache[key] = _sprite(spr, fit)
+            cx, cy, fw = self.steady_face(e)
+            self.cache[("word_at", id(e))] = (cx, cy, fw, self.faces.at(e.start_s) is not None)
+        spr = self.cache[key]
+        cx, cy, fw, has_face = self.cache[("word_at", id(e))]
+        a = _ramp(lt, d, 0.3, 0.25)
+        drop = (1 - _ease_out(lt / 0.35)) * self.h * 0.04
+        sh, sw = spr.shape[:2]
+        # only the word's lower part tucks behind the hair, so it stays readable
+        centre_y = max(self.h * 0.12 + sh / 2, cy - fw * 0.8 - sh * 0.3) if has_face else self.h * 0.3
+        x, y = int(self.w / 2 - sw / 2), int(centre_y - sh / 2 - drop)
+        mask = self.person_mask(img, t)
+        back = cv2.convertScaleAbs(img, alpha=1 - 0.25 * a)  # dim the room a little so the word reads
+        _paste(back, spr, x, y, a)
+        return cv2.blendLinear(img, back, mask, 1 - mask)  # person on top, word behind
+
     def freeze_frame(self, img, e, lt, d, t):
         key = ("freeze", id(e))
         if key not in self.cache:  # first frame of the window: keep it, draw the label once
@@ -252,10 +311,36 @@ class _Renderer:
         return np.asarray(canvas), 0, 0
 
 
+TRANSITION_HALF_S = 0.14  # a transition spans this long either side of the cut
+
+
+def transition(img: np.ndarray, kind: str, p: float) -> np.ndarray:
+    """p: -1 .. 0 (the cut) .. 1. The outgoing shot leaves before 0, the incoming one arrives after."""
+    h, w = img.shape[:2]
+    k = 1 - abs(p)  # 1 at the cut
+    if kind == "whip":  # fast sideways pan with motion blur: out to the left, in from the right
+        dx = -0.22 * w * _ease_inout(1 + p) if p < 0 else 0.22 * w * _ease_inout(1 - p)
+        m = np.float32([[1, 0, dx], [0, 1, 0]])
+        img = cv2.warpAffine(img, m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        blur = int(3 + 90 * k * k)
+        return cv2.blur(img, (blur, 1)) if blur > 3 else img
+    if kind == "zoom":  # zoom in through the cut, a little blur at the peak
+        img = _zoom(img, 1 + 0.4 * k * k, w / 2, h * 0.4)
+        blur = int(1 + 16 * k * k)
+        return cv2.blur(img, (blur, blur)) if blur > 2 else img
+    if kind == "flash":
+        a = 0.9 * k * k
+        return cv2.addWeighted(img, 1 - a, np.full_like(img, 255), a, 0)
+    return img
+
+
 def apply(src: Path, dest: Path, effects: list[Effect], faces: FaceTrack, w: int, h: int, fps: int, accent: str,
-          total_s: float, on: Callable[[float], None] = lambda _: None, crf: int = 16) -> Path:
-    """src (w x h, fps) -> dest with the effects drawn in. Audio is copied untouched."""
-    r = _Renderer(effects, faces, w, h, fps, accent)
+          total_s: float, on: Callable[[float], None] = lambda _: None, crf: int = 16,
+          transitions: list[tuple[float, str]] = (), motion_frames: dict | None = None) -> Path:
+    """src (w x h, fps) -> dest with the effects and transitions drawn in. Audio is copied untouched.
+    transitions: (reel time of the cut, kind) - see transition().
+    motion_frames: id(effect) -> motion.Frames for the motion graphics (motion.render_all)."""
+    r = _Renderer(effects, faces, w, h, fps, accent, motion_frames)
     dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(src), "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                            stdout=subprocess.PIPE)
     enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
@@ -273,9 +358,14 @@ def apply(src: Path, dest: Path, effects: list[Effect], faces: FaceTrack, w: int
                 break
             t = i / fps
             active = [e for e in effects if e.start_s <= t < e.end_s]
-            if active:
+            cut = next(((c, kind) for c, kind in transitions if abs(t - c) < TRANSITION_HALF_S), None)
+            if active or cut:
                 img = np.frombuffer(b, np.uint8).reshape(h, w, 3).copy()
-                b = np.ascontiguousarray(r.frame(img, t, active)).tobytes()
+                if active:
+                    img = r.frame(img, t, active)
+                if cut:
+                    img = transition(img, cut[1], (t - cut[0]) / TRANSITION_HALF_S)
+                b = np.ascontiguousarray(img).tobytes()
             enc.stdin.write(b)
             if i % fps == 0:
                 on(min(1.0, t / end))

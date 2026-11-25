@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db import session_scope
 from app.models import Clip, MediaStatus, Project, ReferenceVideo
 from app.services import analysis as A
+from app.services import reps as REPS
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +95,8 @@ def analyze_clip(clip_id: str) -> str:
         timer.lap("scenes_silence_loudness")
         result["transcript"] = A.transcribe(proxy, language)
         timer.lap("transcribe")
+        result["reps"] = REPS.detect(proxy)  # push-ups, squats...: for counters that count the real reps
+        timer.lap("reps")
         result["seconds_taken"] = round(time.monotonic() - t0, 1)
         result["timings"] = timer.laps
 

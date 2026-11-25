@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.stage { align-items: flex-start; }
+.nc { display: flex; align-items: stretch; animation: slideIn .55s cubic-bezier(.2,1,.3,1) both; }
+.bar2 { width: 16px; background: var(--accent); border-radius: 8px; margin-right: 26px; animation: grow2 .4s ease-out both; transform-origin: bottom; }
+.txt { display: flex; flex-direction: column; justify-content: center; }
+.name { font-size: 68px; font-weight: 900; line-height: 1.05; background: #fff; color: #111; padding: 10px 26px; border-radius: 16px; }
+.role { font-size: 36px; font-weight: 700; margin-top: 12px; padding: 8px 24px; background: rgba(0,0,0,.6); border-radius: 12px; align-self: flex-start;
+  animation: fxRise .4s cubic-bezier(.2,1,.3,1) .25s both; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(-120px); } to { opacity: 1; transform: none; } }
+@keyframes grow2 { from { transform: scaleY(0); } }</style></head><body><script>function fxBuild(FX, s) {
+  const nc = el("div", "nc", null, s);
+  el("div", "bar2", null, nc);
+  const txt = el("div", "txt", null, nc);
+  el("div", "name", FX.title || "Your Name", txt);
+  if (FX.items[0]) el("div", "role", FX.items[0], txt);
+}</script><script src="_base.js"></script></body></html>

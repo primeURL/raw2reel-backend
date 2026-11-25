@@ -19,6 +19,37 @@ class UserOut(ORM):
     created_at: datetime
 
 
+# Creator memory --------------------------------------------------------------
+
+
+class LessonOut(ORM):
+    id: uuid.UUID
+    text: str
+    applies_to: str
+    rule: str | None
+    active: bool
+    project_id: uuid.UUID | None
+    request: str | None
+    created_at: datetime
+
+
+class LessonIn(BaseModel):
+    text: str = Field(min_length=3, max_length=200)
+    applies_to: str = Field(default="all", max_length=40)
+
+
+class LessonPatch(BaseModel):
+    text: str | None = Field(default=None, min_length=3, max_length=200)
+    applies_to: str | None = Field(default=None, max_length=40)
+    active: bool | None = None
+
+
+class LearntLesson(BaseModel):
+    id: uuid.UUID
+    text: str
+    applies_to: str
+
+
 # Uploads -------------------------------------------------------------------
 
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/quicktime", "video/x-m4v", "video/webm"}
@@ -58,6 +89,7 @@ class StyleOut(ORM):
     reference_notes: list[str] | None = None
     reference_count: int = 0
     references_ready: int = 0
+    template: str | None = None  # made from this ready-made template
 
 
 class StyleRename(BaseModel):
@@ -121,12 +153,43 @@ def _check_stats(v: Stats | None) -> Stats | None:
     return v
 
 
+class CaptionPrefs(BaseModel):
+    """None = follow the style."""
+
+    enabled: bool | None = None
+    animation: Literal["none", "fade", "pop", "slide_up", "typewriter", "karaoke"] | None = None
+    look: str | None = Field(default=None, max_length=40)  # a caption look id (app/services/caption_looks.py)
+    size: Literal["small", "medium", "large"] | None = None
+    position: Literal["upper_third", "middle", "lower_middle"] | None = None
+    highlight: bool | None = None
+    case: Literal["sentence", "upper"] | None = None
+
+
+class MusicPrefs(BaseModel):
+    """None = the AI decides."""
+
+    enabled: bool | None = None
+    track: str | None = Field(default=None, max_length=80)  # a library track id
+    volume: Literal["low_under_voice", "medium", "music_led"] | None = None
+
+
+class Prefs(BaseModel):
+    """The creator's own choices for one reel; anything None follows the style."""
+
+    captions: CaptionPrefs = Field(default_factory=CaptionPrefs)
+    music: MusicPrefs = Field(default_factory=MusicPrefs)
+    sound_effects: Literal["off", "subtle", "punchy"] | None = None
+    transitions: Literal["cuts", "smooth", "energetic"] | None = None
+    effects: Literal["none", "few", "lots"] | None = None
+
+
 class ProjectCreate(BaseModel):
     title: str = Field(default="Untitled reel", max_length=200)
     style_id: uuid.UUID | None = None
     script: str | None = Field(default=None, max_length=4000)
     language: Language | None = None
     stats: Stats | None = None
+    prefs: Prefs | None = None
 
     @field_validator("stats")
     @classmethod
@@ -142,6 +205,7 @@ class ProjectUpdate(BaseModel):
     script: str | None = Field(default=None, max_length=4000)
     language: Language | None = None
     stats: Stats | None = None
+    prefs: Prefs | None = None
 
     @field_validator("stats")
     @classmethod
@@ -164,6 +228,7 @@ class ClipOut(ORM):
     created_at: datetime
     thumbnail_url: str | None = None
     download_url: str | None = None
+    preview_url: str | None = None  # the upright H.264 proxy: what the editor plays (same timing as renders)
     analysis_status: MediaStatus | None = None
     contact_sheet_url: str | None = None
     has_speech: bool | None = None
@@ -188,9 +253,14 @@ class ProjectSummary(ORM):
 class ProjectOut(ProjectSummary):
     script: str | None
     stats: dict | None
+    prefs: dict | None = None
     plan: dict | None
     plan_timeline: dict | None = None
     plan_warnings: list[str] = []
+    plan_request: str | None = None  # what the creator asked for, when the plan is a revision
+    plan_changes: list[str] = []  # what the AI changed for that request
+    plan_lesson: LearntLesson | None = None  # what the editor learnt from that request (creator memory)
+    plan_kept_lessons: list[str] = []  # earlier lessons the app applied to this edit
     clip_aliases: dict[str, uuid.UUID] = {}
     error: str | None
     clips: list[ClipOut] = []
@@ -220,6 +290,10 @@ class ClipAnalysisOut(BaseModel):
     analysis: dict | None
     proxy_url: str | None = None
     contact_sheet_url: str | None = None
+
+
+class ReviseRequest(BaseModel):
+    request: str = Field(min_length=2, max_length=600)
 
 
 class RenderRequest(BaseModel):

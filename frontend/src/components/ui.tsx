@@ -9,12 +9,14 @@ import { useTheme } from '@/hooks/use-theme';
 
 /** onRefresh: pull-to-refresh. The spinner shows only while the user's own pull is running -
  * not during the background polling that keeps statuses fresh (that made it flash every 3 s). */
-export function Screen({ title, subtitle, right, children, onRefresh }: {
+export function Screen({ title, subtitle, right, children, onRefresh, sticky }: {
   title: string;
   subtitle?: string;
   right?: ReactNode;
   children: ReactNode;
   onRefresh?: () => unknown;
+  /** stays pinned to the top while the rest scrolls (e.g. tabs) */
+  sticky?: ReactNode;
 }) {
   const t = useTheme();
   const [pulling, setPulling] = useState(false);
@@ -30,6 +32,7 @@ export function Screen({ title, subtitle, right, children, onRefresh }: {
     <SafeAreaView style={[styles.safe, { backgroundColor: t.background }]} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.scroll}
+        stickyHeaderIndices={sticky ? [1] : undefined}
         refreshControl={onRefresh ? <RefreshControl refreshing={pulling} onRefresh={pull} tintColor={t.accent} colors={[t.accent]} progressBackgroundColor={t.backgroundElement} /> : undefined}>
         <View style={styles.inner}>
           <View style={styles.header}>
@@ -39,8 +42,9 @@ export function Screen({ title, subtitle, right, children, onRefresh }: {
             </View>
             {right}
           </View>
-          {children}
         </View>
+        {sticky ? <View style={[styles.stickyWrap, { backgroundColor: t.background }]}><View style={styles.inner}>{sticky}</View></View> : null}
+        <View style={[styles.inner, { paddingTop: Spacing.three }]}>{children}</View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -175,9 +179,10 @@ export function formatSeconds(s: number): string {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: { paddingBottom: BottomTabInset + Spacing.six, alignItems: 'center' },
-  inner: { width: '100%', maxWidth: MaxContentWidth, paddingHorizontal: Spacing.three, gap: Spacing.three },
-  header: { flexDirection: 'row', alignItems: 'center', paddingTop: Spacing.four, paddingBottom: Spacing.two, gap: Spacing.three },
+  scroll: { paddingBottom: BottomTabInset + Spacing.six },
+  stickyWrap: { width: '100%', alignItems: 'center', paddingVertical: Spacing.two },
+  inner: { width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center', paddingHorizontal: Spacing.three, gap: Spacing.three },
+  header: { flexDirection: 'row', alignItems: 'center', paddingTop: Spacing.four, gap: Spacing.three },
   title: { fontSize: 32, fontWeight: '700', letterSpacing: -0.5 },
   subtitle: { fontSize: 15, marginTop: Spacing.one },
   button: { minHeight: 48, borderRadius: Radius.md, paddingHorizontal: Spacing.four, alignItems: 'center', justifyContent: 'center' },

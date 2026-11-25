@@ -30,6 +30,11 @@ fonttools==4.57.0
 
 # Face tracking for effects and keeping captions off faces (YuNet model in app/assets/models)
 opencv-python-headless==4.11.0.86
+# Person cut-out for text behind the speaker (MediaPipe selfie segmenter, run with LiteRT)
+ai-edge-litert==2.4.0
+
+# Motion-graphics effects: HTML/CSS animations rendered frame by frame in headless Chromium
+playwright==1.52.0
 
 # Claude: style analysis + edit plans
 anthropic==2.10.0

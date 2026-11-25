@@ -38,6 +38,7 @@ def _out(style: Style, db: Session) -> StyleOut:
     out.reference_count = len(refs)
     out.references_ready = sum(r.analysis_status == MediaStatus.ready for r in refs)
     out.reference_notes = (style.meta or {}).get("reference_notes")
+    out.template = (style.meta or {}).get("template")
     return out
 
 

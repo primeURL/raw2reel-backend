@@ -115,6 +115,7 @@ class Project(TimestampMixin, Base):
     stats: Mapped[dict | None] = mapped_column(JSON)  # facts for a stats card, e.g. {"Distance": "2.06 km"}
     plan: Mapped[dict | None] = mapped_column(JSON)  # current edit plan JSON
     plan_meta: Mapped[dict | None] = mapped_column(JSON)  # clip alias map, timeline, warnings, usage
+    prefs: Mapped[dict | None] = mapped_column(JSON)  # the creator's choices: caption look, sounds... (services/prefs.py)
     error: Mapped[str | None] = mapped_column(Text)
 
     clips: Mapped[list["Clip"]] = relationship(
@@ -182,3 +183,19 @@ class Clip(TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
 
     project: Mapped[Project] = relationship(back_populates="clips")
+
+
+class Lesson(TimestampMixin, Base):
+    """Creator memory: something the creator taught the editor by asking for a change (or typed in
+    themselves), followed in every later edit. services/lessons.py."""
+
+    __tablename__ = "lessons"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(String(200))  # e.g. "No pop sounds"
+    applies_to: Mapped[str] = mapped_column(String(40), default="all")  # "all" or a kind of reel, e.g. "workout"
+    rule: Mapped[str | None] = mapped_column(String(48))  # one the app enforces itself, e.g. "no_sound:pop"
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
+    request: Mapped[str | None] = mapped_column(Text)  # the creator's words it came from

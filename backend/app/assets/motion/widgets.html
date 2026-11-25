@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; width: 100%; }
+.w { padding: 30px 32px; display: flex; flex-direction: column; gap: 6px; animation: fxPop .45s cubic-bezier(.2,1.4,.4,1) both, float 3s ease-in-out infinite alternate; }
+.w .i { font-size: 62px; line-height: 1.1; }
+.w .val { font-size: 52px; font-weight: 900; color: #fff; }
+.w .lab { font-size: 30px; font-weight: 700; opacity: .8; }
+.w:nth-child(even) { margin-top: 40px; }
+@keyframes float { from { translate: 0 0; } to { translate: 0 -16px; } }</style></head><body><script>function fxBuild(FX, s) {
+  const grid = el("div", "grid", null, s);
+  const items = (FX.items.length ? FX.items : ["🔥|Calories|120", "⏱️|Time|20 min", "💪|Reps|100", "❤️|Heart|142 bpm"]).slice(0, 4);
+  items.forEach((raw, k) => {
+    const [icon, label, value] = raw.split("|").map((x) => x.trim());
+    const w = el("div", "w glass", null, grid);
+    el("div", "i", icon || "✨", w);
+    if (value) el("div", "val", value, w);
+    el("div", "lab", value ? label : (label || ""), w);
+    w.style.animationDelay = stagger(k, items.length, 0.1, 0.5) + "s, " + (k * 0.4) + "s";
+  });
+}</script><script src="_base.js"></script></body></html>

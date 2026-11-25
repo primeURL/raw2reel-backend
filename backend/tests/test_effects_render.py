@@ -1,4 +1,4 @@
-"""All seven effects render on a synthetic clip (no face in it, so they fall back to the
+"""All eight effects render on a synthetic clip (no face in it, so they fall back to the
 middle of the frame), the length is kept, and the quality checks come back. ~20 s, no network."""
 import subprocess
 from pathlib import Path
@@ -31,11 +31,13 @@ def test_every_effect_renders(tmp_path: Path):
             {"type": "flash", "start_s": 6.8, "end_s": 7.1},
             {"type": "countdown", "start_s": 7.2, "end_s": 9.0},
             {"type": "slow_push", "start_s": 9.0, "end_s": 10.9},
+            {"type": "backdrop_word", "start_s": 0.2, "end_s": 1.8, "text": "test"},
         ],
+        "sound_effects": "punchy",
         "music": {"enabled": False, "mood": "", "volume": "medium"}, "end_fade_s": 0.5,
     })
     plan, warnings, tl = validate(plan, {"C1": ClipInfo("C1", 12.0)}, None)
-    assert len(plan.effects) == 7, warnings
+    assert len(plan.effects) == 8, warnings
     stages = []
     res = R.render(plan, tl, {"C1": (proxy, True)}, None, tmp_path / "out", quality="preview",
                    progress=lambda f, s: stages.append((round(f, 2), s)))

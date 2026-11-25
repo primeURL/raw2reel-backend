@@ -7,6 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.caption_looks import LOOK_IDS, help_text
+
+CaptionLookId = Literal[LOOK_IDS]  # type: ignore[valid-type]
+
 
 class Pacing(BaseModel):
     reel_type: Literal["cinematic", "talking_tips", "mixed"] = Field(
@@ -31,7 +35,11 @@ class Captions(BaseModel):
     position: Literal["upper_third", "middle", "lower_middle"] = Field(
         description="never in the bottom 15% (app buttons)"
     )
-    animation: Literal["none", "fade", "pop", "slide_up", "typewriter"]
+    animation: Literal["none", "fade", "pop", "slide_up", "typewriter", "karaoke"] = Field(
+        description="karaoke = the whole line shows and the highlight moves word by word as it is spoken")
+    look: CaptionLookId | None = Field(default=None, description=(
+        "the ready-made caption design closest to the references' captions (font feel, outline, boxes, "
+        "how the key word is marked): " + help_text()))
     keyword_highlight: bool = Field(description="emphasise numbers / key words with the accent colour")
     text_color: str = Field(description="hex, e.g. #FFFFFF")
     font_feel: str = Field(description="describe the type feel, e.g. 'clean rounded sans', 'elegant serif' - never a copied brand font")

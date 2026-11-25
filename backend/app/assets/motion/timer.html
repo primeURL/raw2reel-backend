@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.ring { width: 420px; height: 420px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1turn), rgba(255,255,255,.2) 0); }
+.inner { width: 350px; height: 350px; border-radius: 50%; background: rgba(15,15,18,.78); display: grid; place-items: center; text-align: center; }
+.time { font-family: "SpaceMono", monospace; font-size: 104px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lab { font-size: 34px; font-weight: 700; opacity: .85; margin-top: -10px; }</style></head><body><script>let secs = 30, timeEl, ring;
+function fxBuild(FX, s) {
+  if (FX.numbers.length) secs = FX.numbers[0];
+  ring = el("div", "ring pop", null, s);
+  const inner = el("div", "inner", null, ring);
+  const box = el("div", "", null, inner);
+  timeEl = el("div", "time", "", box);
+  if (FX.title) el("div", "lab", FX.title, box);
+}
+function fxTick(t) {
+  // the clock runs the whole requested time across the effect's length, ending at 0
+  const p = Math.min(1, Math.max(0, t / Math.max(0.5, FX.duration - 0.35)));
+  const left = Math.max(0, Math.ceil(secs * (1 - p)));
+  timeEl.textContent = Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+  ring.style.setProperty("--p", 1 - p);
+}</script><script src="_base.js"></script></body></html>

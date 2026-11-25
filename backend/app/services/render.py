@@ -23,9 +23,13 @@ from pathlib import Path
 
 from PIL import Image
 
+from app.services import caption_looks
 from app.services import effects as fx
 from app.services import faces as F
 from app.services import graphics
+from app.services import motion as MO
+from app.services import music as M
+from app.services import sfx as S
 from app.services.plan_schema import EditPlan
 
 log = logging.getLogger(__name__)
@@ -52,6 +56,25 @@ class RenderResult:
     thumbnail: Path
     notes: list[str] = field(default_factory=list)  # what the renderer changed on its own
     checks: list[dict] = field(default_factory=list)  # [{name, ok, detail}]
+
+
+def _even(v: float) -> int:
+    return max(2, int(round(v / 2)) * 2)
+
+
+def _crop_layer(png: Path, work: Path, scale: float) -> tuple[Path, int, int, int, int]:
+    """Cut a full-frame graphics layer down to what's drawn on it. Returns the cropped file and its
+    place and size on the output frame (x, y, w, h), all scaled by `scale` (preview = 0.5)."""
+    im = Image.open(png)
+    box = im.getchannel("A").getbbox() if im.mode == "RGBA" else None
+    if not box:
+        return png, 0, 0, _even(im.width * scale), _even(im.height * scale)
+    pad = 6
+    x0, y0 = max(0, box[0] - pad), max(0, box[1] - pad)
+    x1, y1 = min(im.width, box[2] + pad), min(im.height, box[3] + pad)
+    out = work / f"{png.stem}_crop.png"
+    im.crop((x0, y0, x1, y1)).save(out)
+    return out, int(x0 * scale), int(y0 * scale), _even((x1 - x0) * scale), _even((y1 - y0) * scale)
 
 
 def _run(cmd: list[str], timeout: int = 300) -> None:
@@ -156,7 +179,8 @@ def render(plan: EditPlan, timeline: dict, sources: dict[str, tuple[Path, bool]]
     accent = (style.get("look") or {}).get("accent_color") or "#FF5A1F"
 
     # 1. segments ---------------------------------------------------------------
-    has_fx = bool(plan.effects)
+    cuts = S.transition_times(plan)
+    has_fx = bool(plan.effects or cuts)
     fx_share = 0.17 if has_fx else 0.0
     segs = []
     footage = max(sum((s.out_s - s.in_s) / s.speed for s in plan.shots), 0.001)
@@ -177,7 +201,9 @@ def render(plan: EditPlan, timeline: dict, sources: dict[str, tuple[Path, bool]]
     # waits forever for frames that never line up.
     joined = work / "joined.mp4"
     report(0.40, "Joining shots")
-    ins = [x for s in segs for x in ("-i", str(s))]
+    # every segment's decoder is open at once: keep each to 2 threads (each thread holds whole
+    # 1080p frames) so a 12-clip reel doesn't need gigabytes
+    ins = [x for s in segs for x in ("-threads", "2", "-i", str(s))]
     pads = "".join(f"[{i}:v][{i}:a]" for i in range(len(segs)))
     _run(["ffmpeg", "-v", "error", "-y", *ins, "-filter_complex", f"{pads}concat=n={len(segs)}:v=1:a=1[v][a]",
           "-map", "[v]", "-map", "[a]", "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
@@ -185,28 +211,39 @@ def render(plan: EditPlan, timeline: dict, sources: dict[str, tuple[Path, bool]]
 
     # 3. faces + effects -----------------------------------------------------------
     report(0.45, "Finding faces")
+    notes: list[str] = []
     faces = F.track(joined, w, h, footage)
     if has_fx:
+        motion_frames = {}
+        if any(e.type in MO.MOTION_TYPES for e in plan.effects):
+            report(0.47, "Drawing graphics")
+            MO.keep_off_face(plan.effects, faces, h, notes)
+            motion_frames = MO.render_all(plan.effects, w, h, FPS, accent, work, lambda f: report(0.47 + 0.01 * f, "Drawing graphics"))
         report(0.48, "Adding effects")
         fxd = work / "effects.mp4"
         fx.apply(joined, fxd, plan.effects, faces, w, h, FPS, accent, footage,
-                 lambda f: report(0.48 + fx_share * f, "Adding effects"))
+                 lambda f: report(0.48 + fx_share * f, "Adding effects"), transitions=cuts, motion_frames=motion_frames)
         joined = fxd
     final_from = 0.48 + fx_share
     report(final_from, "Adding captions and cards")
 
     # 4. graphics as PNG layers ------------------------------------------------------
-    def caption_layer(i, c, center_y=None):
+    look = caption_looks.get(cap_style.get("look"))
+
+    def caption_layer(i, c, center_y=None, words=None, name=None, active=None):
         return graphics.caption_png(
-            c.text, work / f"cap{i:02d}.png", position=c.position,
+            c.text, work / (name or f"cap{i:02d}.png"), position=c.position,
             size=cap_style.get("size", "small"), weight=cap_style.get("weight", "medium"),
             color=cap_style.get("text_color", "#FFFFFF"), accent=accent, highlight=c.highlight,
-            case=cap_style.get("case", "sentence"), center_y=center_y,
+            case=cap_style.get("case", "sentence"), center_y=center_y, visible_words=words,
+            look=look, active_word=active,
         )
 
-    notes: list[str] = []
     still_on_face = 0
-    layers: list[tuple[Path, float, float]] = []  # (png, start, end)
+    layers: list[tuple[Path, float, float, str]] = []  # (png, start, end, animation)
+    anim_name = (look.animation if look and look.animation else None) or cap_style.get("animation", "fade")
+    cap_anim = {"pop": "pop", "typewriter": "typewriter", "slide_up": "slide_up", "none": "none",
+                "karaoke": "karaoke"}.get(anim_name, "fade")
     card_times = [(o.start_s, o.end_s) for o in plan.overlays if o.type == "stats_card"]
     for i, c in enumerate(plan.captions):
         png = caption_layer(i, c)
@@ -242,13 +279,35 @@ def render(plan: EditPlan, timeline: dict, sources: dict[str, tuple[Path, bool]]
                         notes.append(f"Caption \u201c{c.text}\u201d moved to {place} to cover less of your face")
                 elif c.position != planned or where.startswith("just"):
                     notes.append(f"Caption \u201c{c.text}\u201d moved to {place} so it doesn't cover your face")
-        layers.append((png, c.start_s, c.end_s))
+        n_words = len(c.text.split())
+        if cap_anim == "typewriter" and n_words > 1:
+            # word by word: one layer per step, each drawn with the same layout (lines never jump)
+            center = graphics.layer_center_y(png)
+            step = min(0.16, (c.end_s - c.start_s) * 0.6 / n_words)
+            for k in range(1, n_words + 1):
+                s0 = c.start_s + (k - 1) * step
+                s1 = c.start_s + k * step if k < n_words else c.end_s
+                layers.append((caption_layer(i, c, center, k, f"cap{i:02d}_w{k:02d}.png"), s0, s1,
+                               "type_first" if k == 1 else "type_last" if k == n_words else "type_step"))
+            continue
+        if cap_anim == "karaoke" and n_words > 1:
+            # the whole line stays; the highlight steps through the words as they're said
+            center = graphics.layer_center_y(png)
+            weights = [max(2, len(wd)) for wd in c.text.split()]  # longer words take longer to say
+            t0, span = c.start_s, c.end_s - c.start_s
+            for k in range(n_words):
+                s0 = t0 + span * sum(weights[:k]) / sum(weights)
+                s1 = t0 + span * sum(weights[:k + 1]) / sum(weights) if k < n_words - 1 else c.end_s
+                layers.append((caption_layer(i, c, center, None, f"cap{i:02d}_k{k:02d}.png", k), s0, s1,
+                               "type_first" if k == 0 else "type_last" if k == n_words - 1 else "type_step"))
+            continue
+        layers.append((png, c.start_s, c.end_s, "fade" if cap_anim == "karaoke" else cap_anim))
     for i, o in enumerate(plan.overlays):
         if o.type == "stats_card":
             png = graphics.stats_card_png(o.title, [(it.label, it.value) for it in o.items], work / f"ovl{i:02d}.png", accent=accent)
         else:
             png = graphics.title_png(o.title or "", work / f"ovl{i:02d}.png")
-        layers.append((png, o.start_s, o.end_s))
+        layers.append((png, o.start_s, o.end_s, "fade"))
     # cards first so captions sit on top of them
     layers.sort(key=lambda l: 0 if l[0].name.startswith("ovl") else 1)
 
@@ -258,24 +317,64 @@ def render(plan: EditPlan, timeline: dict, sources: dict[str, tuple[Path, bool]]
     inputs = ["-i", str(joined)]
     chains = [f"[0:v]tpad=stop_mode=clone:stop_duration={tail:.3f},scale={w}:{h}[base]"]
     last = "base"
-    for k, (png, start, end) in enumerate(layers, start=1):
-        d = max(end - start, 0.1)
-        fade = min(FADE_S, d / 3)
-        inputs += ["-loop", "1", "-t", f"{d:.3f}", "-i", str(png)]
-        chains.append(
-            f"[{k}:v]scale={w}:{h},format=rgba,fade=t=in:st=0:d={fade:.3f}:alpha=1,"
-            f"fade=t=out:st={d - fade:.3f}:d={fade:.3f}:alpha=1,setpts=PTS-STARTPTS+{start:.3f}/TB[l{k}]"
-        )
-        chains.append(f"[{last}][l{k}]overlay=0:0:eof_action=pass:enable='between(t,{start:.3f},{end:.3f})'[o{k}]")
+    for k, (png, start, end, anim) in enumerate(layers, start=1):
+        d = max(end - start, 0.05)
+        # typewriter steps swap hard (no fade between words); only the whole caption fades out
+        fade_in = 0.0 if anim in ("none", "type_step", "type_last") else min(FADE_S if anim == "fade" else 0.12, d / 3)
+        fade_out = 0.0 if anim in ("type_first", "type_step") else min(FADE_S if anim != "none" else 0.0, d / 3)
+        # only the drawn part of the layer, placed where it was drawn: far less to blend per frame
+        png, x, y, lw, lh = _crop_layer(png, work, w / graphics.W)
+        # -itsoffset puts the layer's own timestamps at its start time, so ffmpeg only reads it when
+        # the reel gets there. (Shifting it later in the filter instead made ffmpeg read every layer
+        # at once and queue full-size RGBA frames until their turn: ~3 GB for 8 captions -> killed.)
+        inputs += ["-loop", "1", "-framerate", str(FPS), "-t", f"{d:.3f}", "-itsoffset", f"{start:.3f}", "-i", str(png)]
+        chain = f"[{k}:v]scale={lw}:{lh},format=rgba"
+        ox, oy = str(x), str(y)
+        if anim == "pop":  # grows in with a small overshoot; padded so the layer keeps one size
+            lt = f"(t-{start:.3f})"
+            grow = f"if(lt({lt},0.12),0.8+0.26*{lt}/0.12,if(lt({lt},0.2),1.06-0.06*({lt}-0.12)/0.08,1))"
+            pw, ph = _even(lw * 1.08), _even(lh * 1.08)
+            chain += (f",scale=w='trunc({lw}*{grow}/2)*2':h=-2:eval=frame,"
+                      f"pad=w={pw}:h={ph}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame")
+            ox, oy = str(x - (pw - lw) // 2), str(y - (ph - lh) // 2)
+        elif anim == "slide_up":  # rises into place
+            oy = f"'{y}+{round(36 * w / graphics.W)}*max(0,1-(t-{start:.3f})/0.22)'"
+        if fade_in:
+            chain += f",fade=t=in:st={start:.3f}:d={fade_in:.3f}:alpha=1"
+        if fade_out:
+            chain += f",fade=t=out:st={start + d - fade_out:.3f}:d={fade_out:.3f}:alpha=1"
+        chain += f"[l{k}]"
+        chains.append(chain)
+        chains.append(f"[{last}][l{k}]overlay=x={ox}:y={oy}:eof_action=pass:enable='between(t,{start:.3f},{end:.3f})'[o{k}]")
         last = f"o{k}"
     fade_out = plan.end_fade_s
     voiced = any(sh.keep_audio and sources[sh.clip][1] for sh in plan.shots)
     # two-pass loudnorm sets the voice level exactly; the limiter catches peaks (and AAC overshoot)
     level = f",{_loudnorm(joined)},aresample=48000,alimiter=limit=0.75:level=disabled" if voiced else ""
     vfinal = f"[{last}]" + (f"fade=t=out:st={total - fade_out:.3f}:d={fade_out:.3f}," if fade_out else "") + "format=yuv420p[vout]"
-    afinal = (f"[0:a]apad=whole_dur={total:.3f}{level}"
-              + (f",afade=t=out:st={total - fade_out:.3f}:d={fade_out:.3f}" if fade_out else "") + "[aout]")
-    chains += [vfinal, afinal]
+    # sound effects go in after the voice is levelled, so they sit at a fixed distance under it
+    sfx_cues = S.cues(plan, total)
+    sfx_in, sfx_chains, sfx_labels = S.mix_graph(sfx_cues, plan.sound_effects, 1 + len(layers))  # after the video and the picture layers
+    inputs += sfx_in
+    # music goes in after the effects, dipped under the levelled voice
+    music = M.mix_graph(plan, total, voiced, 1 + len(layers) + len(sfx_in) // 2, "vkey" if voiced else None)
+    if music:
+        inputs += music.inputs
+    afade = f",afade=t=out:st={total - fade_out:.3f}:d={fade_out:.3f}" if fade_out else ""
+    extra = [*sfx_labels, *([music.label] if music else [])]
+    if extra:
+        voice = level[1:] if level else "anull"
+        if music and voiced:
+            chains.append(f"[0:a]apad=whole_dur={total:.3f},{voice},asplit=2[voice][vkey]")
+        else:
+            chains.append(f"[0:a]apad=whole_dur={total:.3f},{voice}[voice]")
+        chains += [*sfx_chains, *(music.chains if music else [])]
+        chains.append("".join(f"[{x}]" for x in ["voice", *extra])
+                      + f"amix=inputs={len(extra) + 1}:normalize=0:duration=first,"
+                      + f"alimiter=limit=0.75:level=disabled{afade}[aout]")
+    else:
+        chains.append(f"[0:a]apad=whole_dur={total:.3f}{level}{afade}[aout]")
+    chains.append(vfinal)
 
     out = work / "reel.mp4"
     _run_progress(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", ";".join(chains),

@@ -33,10 +33,11 @@ from app.schemas import (
     ProjectUpdate,
     RenderOut,
     RenderRequest,
+    ReviseRequest,
 )
 from app.services.ai_usage import require_quota
 from app.services.plan_schema import EditPlan
-from app.services.plan_validate import ClipInfo, PlanError, clip_words, validate
+from app.services.plan_validate import ClipInfo, PlanError, validate
 from app.tasks.analysis import analyze_clip
 from app.tasks.clips import process_clip
 
@@ -85,6 +86,8 @@ def _clip_out(clip: Clip, with_download: bool = False) -> ClipOut:
         out.has_speech, out.transcript_text, out.spoken_language = t.get("has_speech"), t.get("text") or None, t.get("language")
     if with_download and clip.status == MediaStatus.ready:
         out.download_url = storage.presign_get(clip.r2_key)
+        if clip.proxy_key:
+            out.preview_url = storage.presign_get(clip.proxy_key)
     return out
 
 
@@ -108,6 +111,10 @@ def _project_out(project: Project) -> ProjectOut:
     meta = project.plan_meta or {}
     out.plan_timeline = meta.get("timeline")
     out.plan_warnings = meta.get("warnings") or []
+    out.plan_request = meta.get("request")
+    out.plan_changes = meta.get("changes") or []
+    out.plan_lesson = meta.get("lesson")
+    out.plan_kept_lessons = meta.get("kept_lessons") or []
     out.clip_aliases = {f"C{i}": c.id for i, c in enumerate(clips, start=1)}
     for k, v in _summary_fields(clips).items():
         setattr(out, k, v)
@@ -342,6 +349,25 @@ def generate_plan(project_id: uuid.UUID, user: User = Depends(current_user), db:
     return _project_out(project)
 
 
+@router.post("/{project_id}/revise", response_model=ProjectOut, status_code=status.HTTP_202_ACCEPTED)
+def revise_plan(
+    project_id: uuid.UUID, body: ReviseRequest, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> ProjectOut:
+    """One AI call: the creator says what to change ("oats first", "more sounds") -> a revised edit,
+    then a new preview is made by itself."""
+    from app.tasks.plans import write_plan
+
+    project = _owned_project(project_id, user, db, with_clips=True)
+    _require_editable(project)
+    if not project.plan:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Make the first edit before asking for changes")
+    require_quota(db, user.id)
+    project.status, project.error = ProjectStatus.analyzing, None
+    db.commit()
+    write_plan.delay(str(project.id), True, body.request)
+    return _project_out(project)
+
+
 @router.put("/{project_id}/plan", response_model=ProjectOut)
 def save_plan(
     project_id: uuid.UUID, body: EditPlan, user: User = Depends(current_user), db: Session = Depends(get_db)
@@ -350,7 +376,7 @@ def save_plan(
     project = _owned_project(project_id, user, db, with_clips=True)
     _require_editable(project)
     clips = sorted(project.clips, key=lambda c: c.position)
-    infos = {f"C{i}": ClipInfo(f"C{i}", c.duration_s or 0, clip_words(c.analysis)) for i, c in enumerate(clips, start=1) if c.status == MediaStatus.ready}
+    infos = {f"C{i}": ClipInfo.of(f"C{i}", c.duration_s or 0, c.analysis) for i, c in enumerate(clips, start=1) if c.status == MediaStatus.ready}
     style = db.get(Style, project.style_id) if project.style_id else None
     try:
         plan, warnings, timeline = validate(body, infos, style.profile if style is not None else None)

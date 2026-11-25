@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.tag { position: relative; padding: 40px 70px 46px; border-radius: 40px; background: var(--accent); color: var(--on-accent); text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,.4); animation: spinIn .7s cubic-bezier(.2,1.4,.4,1) both, wob 1.8s ease-in-out .8s infinite alternate; }
+.lab { font-size: 46px; font-weight: 900; letter-spacing: 6px; background: #fff; color: #111; padding: 6px 26px; border-radius: 12px; display: inline-block; }
+.price { font-family: "Montserrat", sans-serif; font-weight: 900; font-size: 170px; line-height: 1.05; }
+.old { font-size: 56px; font-weight: 700; opacity: .85; text-decoration: line-through; text-decoration-thickness: 6px; }
+@keyframes spinIn { from { opacity: 0; transform: scale(.2) rotate(-200deg); } to { opacity: 1; transform: rotate(-6deg); } }
+@keyframes wob { from { rotate: 0deg; } to { rotate: 5deg; } }</style></head><body><script>function fxBuild(FX, s) {
+  const tag = el("div", "tag", null, s);
+  el("div", "lab", FX.title || "SALE", tag);
+  const cur = FX.unit || "₹";
+  const p = FX.numbers.length ? FX.numbers[0] : 499;
+  el("div", "price", cur + fmt(p), tag);
+  if (FX.numbers.length > 1) el("div", "old", cur + fmt(FX.numbers[1]), tag);
+}</script><script src="_base.js"></script></body></html>

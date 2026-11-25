@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.head { padding: 14px 34px; font-weight: 700; font-size: 34px; border-radius: 999px; }
+.list { width: 100%; display: flex; flex-direction: column; gap: 18px; }
+.b { max-width: 78%; padding: 22px 32px; font-size: 40px; font-weight: 700; line-height: 1.25; border-radius: 40px; box-shadow: 0 12px 34px rgba(0,0,0,.3); }
+.b.them { align-self: flex-start; background: #fff; color: #111; border-bottom-left-radius: 12px; transform-origin: left bottom; }
+.b.me { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 12px; transform-origin: right bottom; }
+.who { display: block; font-size: 26px; opacity: .6; margin-bottom: 4px; }</style></head><body><script>function fxBuild(FX, s) {
+  if (FX.title) el("div", "head glass pop", FX.title, s);
+  const list = el("div", "list", null, s);
+  const items = (FX.items.length ? FX.items : ["Did you finish?", "Me: 100 push-ups done 💪"]).slice(0, 5);
+  items.forEach((raw, k) => {
+    let me = /^(me|i)\s*:/i.test(raw) || raw.startsWith("> ");
+    let text = raw.replace(/^(me|i)\s*:\s*|^>\s*/i, "");
+    let who = null;
+    const m = !me && text.match(/^([^:]{1,18}):\s*(.+)$/);
+    if (m) { who = m[1]; text = m[2]; }
+    const b = el("div", "b pop " + (me ? "me" : "them"), null, list);
+    if (who) el("span", "who", who, b);
+    b.appendChild(document.createTextNode(text));
+    b.style.animationDelay = stagger(k, items.length, 0.15, 0.6) + "s";
+  });
+}</script><script src="_base.js"></script></body></html>

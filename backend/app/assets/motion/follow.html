@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.f { display: flex; align-items: center; gap: 26px; padding: 22px 26px 22px 22px; border-radius: 999px; }
+.av { width: 110px; height: 110px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-size: 56px; font-weight: 900; }
+.h { font-size: 44px; font-weight: 700; }
+.btn { position: relative; font-size: 40px; font-weight: 900; padding: 20px 44px; border-radius: 999px; background: var(--accent); color: var(--on-accent); min-width: 360px; height: 96px; text-align: center; }
+.btn span { position: absolute; inset: 0; display: grid; place-items: center; }
+.a { animation: hide .15s both; animation-delay: var(--tap); }
+.b2 { opacity: 0; animation: fxFade .15s both; animation-delay: var(--tap); }
+.btn.go { animation: done .2s both; animation-delay: var(--tap); }
+.hand { position: absolute; font-size: 110px; right: 40px; top: 70px; animation: tap 0.9s ease-in-out both; animation-delay: calc(var(--tap) - .55s); }
+@keyframes hide { to { opacity: 0; } }
+@keyframes done { to { background: rgba(255,255,255,.92); color: #111; } }
+@keyframes tap { 0% { opacity: 0; transform: translate(80px, 120px); } 55% { opacity: 1; transform: none; } 65% { transform: scale(.85); } 80% { transform: none; } 100% { opacity: 0; } }</style></head><body><script>function fxBuild(FX, s) {
+  document.documentElement.style.setProperty("--tap", Math.min(1.6, FX.duration * 0.5) + "s");
+  const f = el("div", "f glass pop", null, s);
+  const handle = FX.title || "@you";
+  el("div", "av", handle.replace(/^@/, "").slice(0, 1).toUpperCase(), f);
+  el("div", "h", handle, f);
+  const btn = el("div", "btn go", null, f);
+  el("span", "a", FX.items[0] || "Follow", btn);
+  el("span", "b2", "Following ✓", btn);
+  el("div", "hand", "👆", f);
+}</script><script src="_base.js"></script></body></html>

@@ -12,7 +12,10 @@ from app.db import session_scope
 from app.models import MediaStatus, Project, ProjectStatus, Render, Style
 from app.services import render as R
 from app.services.plan_schema import EditPlan
-from app.services.plan_validate import ClipInfo, PlanError, clip_words, validate
+from app.services.plan_validate import ClipInfo, PlanError, validate
+from app.services import lessons as LS
+from app.services import music
+from app.services.prefs import enforce, merged_style
 
 log = logging.getLogger(__name__)
 
@@ -60,10 +63,12 @@ def render_project(render_id: str) -> str:
         p = db.get(Project, r.project_id)
         project_id, user_id, version, quality = str(p.id), p.user_id, r.version, r.quality
         style = db.get(Style, p.style_id) if p.style_id else None
-        profile = style.profile if style is not None else None
+        prefs = p.prefs
+        learnt = LS.as_dicts(LS.active(db, p.user_id))
+        profile = merged_style(style.profile if style is not None else None, prefs)
         clips = sorted(p.clips, key=lambda c: c.position)
         sources = {
-            f"C{i}": (c.proxy_key, bool(c.has_audio), c.duration_s or 0, clip_words(c.analysis))
+            f"C{i}": (c.proxy_key, bool(c.has_audio), c.duration_s or 0, c.analysis)
             for i, c in enumerate(clips, start=1)
             if c.status == MediaStatus.ready and c.proxy_key
         }
@@ -74,9 +79,11 @@ def render_project(render_id: str) -> str:
     t0 = time.monotonic()
     try:
         # re-check the plan against today's clips and rules (free) before spending CPU
-        plan, warnings, timeline = validate(
-            EditPlan.model_validate(plan_data), {a: ClipInfo(a, d, w) for a, (_, _, d, w) in sources.items()}, profile
-        )
+        plan = EditPlan.model_validate(plan_data)
+        LS.enforce(plan, learnt)  # lessons learnt since this edit was written hold too (banned sounds...)
+        enforce(plan, prefs)  # choices made after the edit (caption look, sounds off...) need no AI
+        plan, warnings, timeline = validate(plan, {a: ClipInfo.of(a, d, an) for a, (_, _, d, an) in sources.items()}, profile)
+        music.assign(plan, project_id)  # older plans, or a pick that left the library: choose by mood
         report = _ProgressWriter(render_id)
         report(0.0, "Getting your clips")
         local = {}

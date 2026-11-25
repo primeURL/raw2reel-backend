@@ -3,9 +3,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Card, Loading, Message, Screen, StatusChip, formatSeconds } from '@/components/ui';
+import { useSession } from '@/lib/session';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
@@ -14,6 +15,9 @@ import type { ProjectSummary } from '@/lib/types';
 const BUSY = new Set(['analyzing', 'rendering']);
 
 export default function ReelsScreen() {
+  const { me } = useSession();
+  const first = me?.name?.split(' ')[0];
+  const t = useTheme();
   const q = useQuery({
     queryKey: ['projects'],
     queryFn: api.projects,
@@ -23,20 +27,45 @@ export default function ReelsScreen() {
 
   return (
     <Screen
-      title="Reels"
-      subtitle="Your edits, newest first"
+      title={first ? `Hi ${first}` : 'Reels'}
+      subtitle="Drop in raw clips. Get a reel back."
       onRefresh={q.refetch}
       right={<Button label="+ New" onPress={() => router.push('/reel/new')} style={{ minHeight: 40 }} />}>
       {q.isPending ? (
         <Loading />
       ) : q.isError ? (
         <Message title="Couldn't load your reels" body={q.error.message} action={<Button label="Try again" kind="secondary" onPress={() => q.refetch()} />} />
-      ) : q.data.length === 0 ? (
-        <Message title="No reels yet" body="Pick a few clips from your phone and Raw2Reel edits them in your style." action={<Button label="Make your first reel" onPress={() => router.push('/reel/new')} />} />
       ) : (
-        q.data.map((p) => <ProjectRow key={p.id} p={p} />)
+        <>
+          <Starters />
+          {q.data.length ? <Text style={[styles.section, { color: t.textSecondary }]}>Your reels</Text> : null}
+          {q.data.map((p) => <ProjectRow key={p.id} p={p} />)}
+        </>
       )}
     </Screen>
+  );
+}
+
+/** Three ways in, like a chat app's suggestions. */
+function Starters() {
+  const t = useTheme();
+  const items = [
+    { icon: '🎬', title: 'Edit my clips', body: 'Raw clips in, reel out', go: () => router.push('/reel/new'), primary: true },
+    { icon: '🔗', title: "Learn a reel's style", body: 'Paste reels you love', go: () => router.push('/styles/new') },
+    { icon: '🎨', title: 'My looks', body: 'Styles you have taught it', go: () => router.push('/styles') },
+  ];
+  return (
+    <View style={styles.starters}>
+      {items.map((x) => (
+        <Pressable key={x.title} onPress={x.go} style={({ pressed }) => [styles.starter, {
+          backgroundColor: x.primary ? t.accent : t.backgroundElement, borderColor: x.primary ? t.accent : t.border, opacity: pressed ? 0.85 : 1,
+        }]}>
+          <Text style={{ fontSize: 26 }}>{x.icon}</Text>
+          <Text style={{ color: x.primary ? t.onAccent : t.text, fontWeight: '800', fontSize: 15 }}>{x.title}</Text>
+          <Text style={{ color: x.primary ? t.onAccent : t.textSecondary, fontSize: 12, opacity: 0.9 }}>{x.body}</Text>
+        </Pressable>
+      ))}
+    </View>
   );
 }
 
@@ -66,4 +95,7 @@ const styles = StyleSheet.create({
   info: { flex: 1, gap: Spacing.one },
   title: { fontSize: 17, fontWeight: '600' },
   meta: { fontSize: 14 },
+  section: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: Spacing.two },
+  starters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  starter: { flexGrow: 1, flexBasis: '30%', minWidth: 140, borderWidth: 1, borderRadius: Radius.lg, padding: Spacing.three, gap: 2 },
 });

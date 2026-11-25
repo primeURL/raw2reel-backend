@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.stage { height: 900px; }
+.p { position: absolute; bottom: 0; font-size: 110px; animation: up var(--life) cubic-bezier(.3,.6,.4,1) both; }
+@keyframes up { 0% { opacity: 0; transform: translate(0, 60px) scale(.4) rotate(0); } 15% { opacity: 1; transform: translate(0,0) scale(1.1); }
+  100% { opacity: 0; transform: translate(var(--dx), -820px) scale(.9) rotate(var(--rot)); } }</style></head><body><script>function fxBuild(FX, s) {
+  s.style.animation = "none";
+  const emojis = FX.items.length ? FX.items : ["🔥", "❤️", "😂", "💪"];
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const n = 18;
+  for (let k = 0; k < n; k++) {
+    const p = el("div", "p", emojis[k % emojis.length], s);
+    p.style.left = 20 + rnd() * 700 + "px";
+    p.style.fontSize = 80 + rnd() * 70 + "px";
+    p.style.setProperty("--dx", (rnd() - 0.5) * 260 + "px");
+    p.style.setProperty("--rot", (rnd() - 0.5) * 70 + "deg");
+    const life = 1.2 + rnd() * 0.8;
+    p.style.setProperty("--life", life + "s");
+    p.style.animationDelay = rnd() * Math.max(0.2, FX.duration - life) + "s";
+  }
+}</script><script src="_base.js"></script></body></html>

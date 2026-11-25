@@ -12,6 +12,8 @@ RUN apt-get update \
       fonts-noto-core \
       fonts-inter \
       fonts-dejavu-core \
+      fonts-noto-color-emoji \
+      chromium \
       fontconfig \
       ca-certificates \
       curl \
@@ -21,6 +23,9 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+
+# motion-graphics effects drive Debian's Chromium (apt, above) through Playwright
+ENV CHROMIUM_PATH=/usr/bin/chromium
 
 COPY . .
 

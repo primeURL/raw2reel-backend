@@ -1,22 +1,31 @@
-/** New reel: the brief (title, style, language, script, stats). Clips are added on the next screen. */
+/**
+ * New reel, clips first: 1. pick your clips  2. pick a look  3. go.
+ * Title, language, script and stats are optional and folded away under "More options".
+ * Uploads start right away and keep going on the reel screen (lib/uploads.ts).
+ */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Button, Choice, Field, SectionTitle } from '@/components/ui';
+import { ChoicesSheet, prefsSummary } from '@/components/choices';
+import { LookPicker } from '@/components/look-picker';
+import { Button, Choice, Field, SectionTitle, formatSeconds } from '@/components/ui';
 import { VoiceButton } from '@/components/voice-button';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
-import type { Language } from '@/lib/types';
+import type { Language, Prefs } from '@/lib/types';
+import { MAX_CLIPS, type PickedClip, pickClips, uploadClips } from '@/lib/uploads';
 
 const LANGUAGES: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'hi', label: 'Hindi' },
+  { value: 'hi', label: 'हिन्दी' },
   { value: 'hinglish', label: 'Hinglish' },
 ];
+
+const defaultTitle = () => `Reel · ${new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 
 export default function NewReelScreen() {
   const t = useTheme();
@@ -24,36 +33,38 @@ export default function NewReelScreen() {
   const styles_ = useQuery({ queryKey: ['styles'], queryFn: api.styles });
   const readyStyles = (styles_.data ?? []).filter((s) => s.status === 'ready');
 
+  const [clips, setClips] = useState<PickedClip[]>([]);
+  const [note, setNote] = useState<string | null>(null);
+  const [styleId, setStyleId] = useState<string | null | undefined>(undefined); // undefined = first ready style
+  const [more, setMore] = useState(false);
+  const [prefs, setPrefs] = useState<Prefs | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const [title, setTitle] = useState('');
-  const [styleId, setStyleId] = useState<string | null | undefined>(undefined); // undefined = default to first ready style
   const [language, setLanguage] = useState<Language>('en');
   const [script, setScript] = useState('');
-  const [stats, setStats] = useState<{ label: string; value: string }[]>([
-    { label: 'Distance', value: '' },
-    { label: 'Pace', value: '' },
-    { label: 'Time', value: '' },
-  ]);
   const chosenStyle = styleId === undefined ? (readyStyles[0]?.id ?? null) : styleId;
+  const seconds = clips.reduce((s, c) => s + (c.duration ?? 0) / 1000, 0);
+
+  async function pick() {
+    const res = await pickClips(MAX_CLIPS - clips.length);
+    setNote(res.note);
+    if (res.clips.length) setClips((c) => [...c, ...res.clips]);
+  }
 
   const create = useMutation({
-    mutationFn: () => {
-      const filled = Object.fromEntries(stats.filter((s) => s.label.trim() && s.value.trim()).map((s) => [s.label.trim(), s.value.trim()]));
-      return api.createProject({
-        title: title.trim() || 'Untitled reel',
-        style_id: chosenStyle,
-        language,
-        script: script.trim() || null,
-        stats: Object.keys(filled).length ? filled : null,
-      });
-    },
+    mutationFn: () => api.createProject({
+      title: title.trim() || defaultTitle(),
+      style_id: chosenStyle,
+      language,
+      script: script.trim() || null,
+      prefs,
+    }),
     onSuccess: (p) => {
       qc.invalidateQueries({ queryKey: ['projects'] });
+      if (clips.length) uploadClips(p.id, clips, () => qc.invalidateQueries({ queryKey: ['project', p.id] }));
       router.replace({ pathname: '/reel/[id]', params: { id: p.id } });
     },
   });
-
-  const setStat = (i: number, key: 'label' | 'value', v: string) =>
-    setStats((rows) => rows.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -67,61 +78,98 @@ export default function NewReelScreen() {
       />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.wrap}>
-          <Field label="Title" value={title} onChangeText={setTitle} placeholder="e.g. Day 2 - 3 km" maxLength={200} />
+          <Step n={1} title="Add your raw clips" done={clips.length > 0} />
+          {clips.length ? (
+            <View style={[styles.picked, { backgroundColor: t.backgroundElement, borderColor: t.border }]}>
+              {clips.map((c, i) => (
+                <View key={`${c.uri}-${i}`} style={styles.pickedRow}>
+                  <Text style={[styles.alias, { color: t.accent }]}>C{i + 1}</Text>
+                  <Text style={{ color: t.text, flex: 1 }} numberOfLines={1}>{c.fileName ?? `Clip ${i + 1}`}</Text>
+                  <Text style={{ color: t.textSecondary }}>{formatSeconds((c.duration ?? 0) / 1000)}</Text>
+                  <Pressable hitSlop={10} onPress={() => setClips((x) => x.filter((_, j) => j !== i))} accessibilityLabel="Remove clip">
+                    <Text style={{ color: t.textSecondary, fontSize: 18 }}>×</Text>
+                  </Pressable>
+                </View>
+              ))}
+              <Text style={{ color: t.textSecondary, fontSize: 13 }}>{clips.length} clip{clips.length === 1 ? '' : 's'} · {formatSeconds(seconds)} · in this order</Text>
+              {clips.length < MAX_CLIPS ? <Button label="+ Add more" kind="ghost" style={styles.small} onPress={pick} /> : null}
+            </View>
+          ) : (
+            <Pressable onPress={pick} style={[styles.drop, { borderColor: t.accent, backgroundColor: t.accent + '14' }]}>
+              <Text style={{ fontSize: 40 }}>🎬</Text>
+              <Text style={{ color: t.text, fontSize: 18, fontWeight: '700' }}>Pick clips from your phone</Text>
+              <Text style={{ color: t.textSecondary, textAlign: 'center' }}>Tap them in the order you want. Up to {MAX_CLIPS}, 5 min each.</Text>
+            </Pressable>
+          )}
+          {note ? <Text style={{ color: t.danger }}>{note}</Text> : null}
 
-          <SectionTitle>Style</SectionTitle>
-          <View style={styles.choices}>
-            {readyStyles.map((s) => (
-              <Choice key={s.id} label={s.profile?.name ?? s.name} selected={chosenStyle === s.id} onPress={() => setStyleId(s.id)} />
-            ))}
-            <Choice label="No style" selected={chosenStyle === null} onPress={() => setStyleId(null)} />
-          </View>
-          {!styles_.isPending && readyStyles.length === 0 ? (
-            <Text style={[styles.hint, { color: t.textSecondary }]}>No ready style yet - the edit will be clean and simple. You can make one in Styles.</Text>
+          <Step n={2} title="Pick a look" done />
+          <LookPicker value={chosenStyle} onChange={setStyleId} />
+
+          <Step n={3} title="Captions & sounds" done />
+          <Pressable onPress={() => setChoosing(true)} style={[styles.choose, { borderColor: t.accent, backgroundColor: t.accent + '12' }]}>
+            <Text style={{ fontSize: 26 }}>💬</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.text, fontWeight: '700' }}>{prefsSummary(prefs)}</Text>
+              <Text style={{ color: t.textSecondary, fontSize: 13 }}>Pop, typewriter or slide-up captions, sound effects, transitions… see them before you start.</Text>
+            </View>
+            <Text style={{ color: t.accent, fontWeight: '700' }}>Choose ›</Text>
+          </Pressable>
+          <ChoicesSheet open={choosing} value={prefs} onClose={() => setChoosing(false)}
+            onSave={(p) => { setPrefs(p); setChoosing(false); }} />
+
+          <Pressable onPress={() => setMore((m) => !m)} style={[styles.more, { borderColor: t.border }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: t.text, fontWeight: '600' }}>More options</Text>
+              <Text style={{ color: t.textSecondary, fontSize: 13 }}>Title, captions language, your story</Text>
+            </View>
+            <Text style={{ color: t.textSecondary, fontSize: 18 }}>{more ? '▴' : '▾'}</Text>
+          </Pressable>
+          {more ? (
+            <View style={{ gap: Spacing.three }}>
+              <Field label="Title" value={title} onChangeText={setTitle} placeholder={defaultTitle()} maxLength={200} />
+              <SectionTitle>Captions language</SectionTitle>
+              <View style={styles.choices}>
+                {LANGUAGES.map((l) => <Choice key={l.value} label={l.label} selected={language === l.value} onPress={() => setLanguage(l.value)} />)}
+              </View>
+              <Field label="Your story (optional)" value={script} onChangeText={setScript} multiline maxLength={4000}
+                placeholder={'What happens, in your words, e.g.\nDay 2. Warm-up first. Target 3 km. Done!'} />
+              <VoiceButton language={language} label="Say it instead" onText={(x) => setScript((s) => (s.trim() ? `${s.trim()}\n${x}` : x))} />
+            </View>
           ) : null}
 
-          <SectionTitle>Language you speak or write in</SectionTitle>
-          <View style={styles.choices}>
-            {LANGUAGES.map((l) => (
-              <Choice key={l.value} label={l.label} selected={language === l.value} onPress={() => setLanguage(l.value)} />
-            ))}
-          </View>
-
-          <Field
-            label="Script or story (optional)"
-            value={script}
-            onChangeText={setScript}
-            multiline
-            maxLength={4000}
-            placeholder={'The order of your clips and the lines to show, e.g.\nDay 2. Warm-up first. Target 3 km. Done!'}
-          />
-          <VoiceButton language={language} label="Speak your script" onText={(x) => setScript((s) => (s.trim() ? `${s.trim()}\n${x}` : x))} />
-
-          <SectionTitle>Stats for the end card (optional)</SectionTitle>
-          <Text style={[styles.hint, { color: t.textSecondary }]}>Only what you fill in is shown - Raw2Reel never invents numbers.</Text>
-          {stats.map((s, i) => (
-            <View key={i} style={styles.statRow}>
-              <View style={{ flex: 1 }}>
-                <Field value={s.label} onChangeText={(v) => setStat(i, 'label', v)} placeholder="Label" maxLength={40} />
-              </View>
-              <View style={{ flex: 1.3 }}>
-                <Field value={s.value} onChangeText={(v) => setStat(i, 'value', v)} placeholder={['2.06 km', '7\'20" /km', '15:10'][i] ?? 'Value'} maxLength={40} />
-              </View>
-            </View>
-          ))}
-
           {create.isError ? <Text style={{ color: t.danger }}>{create.error.message}</Text> : null}
-          <Button label="Next: add clips" onPress={() => create.mutate()} loading={create.isPending} />
+          <Button label={clips.length ? 'Create reel' : 'Pick clips first'} disabled={!clips.length} onPress={() => create.mutate()} loading={create.isPending} />
+          <Text style={{ color: t.textSecondary, fontSize: 13, textAlign: 'center' }}>Your clips upload while you carry on. Nothing is edited until you say so.</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
+function Step({ n, title, done }: { n: number; title: string; done?: boolean }) {
+  const t = useTheme();
+  return (
+    <View style={styles.step}>
+      <View style={[styles.stepDot, { backgroundColor: done ? t.accent : t.backgroundSelected }]}>
+        <Text style={{ color: done ? t.onAccent : t.textSecondary, fontWeight: '800', fontSize: 13 }}>{n}</Text>
+      </View>
+      <Text style={{ color: t.text, fontSize: 20, fontWeight: '700' }}>{title}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   scroll: { paddingBottom: Spacing.six, alignItems: 'center' },
   wrap: { width: '100%', maxWidth: MaxContentWidth, padding: Spacing.four, gap: Spacing.three },
+  step: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginTop: Spacing.two },
+  stepDot: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  drop: { borderWidth: 2, borderStyle: 'dashed', borderRadius: Radius.lg, padding: Spacing.five, alignItems: 'center', gap: Spacing.two },
+  picked: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.lg, padding: Spacing.three, gap: Spacing.two },
+  pickedRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  alias: { width: 28, fontWeight: '800', fontSize: 13 },
+  small: { minHeight: 36, alignSelf: 'flex-start', paddingHorizontal: 0 },
+  choose: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, borderWidth: 1.5, borderRadius: Radius.lg, padding: Spacing.three },
+  more: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: Radius.md, padding: Spacing.three, marginTop: Spacing.two },
   choices: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  hint: { fontSize: 14 },
-  statRow: { flexDirection: 'row', gap: Spacing.two },
 });

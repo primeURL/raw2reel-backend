@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.pin { font-size: 150px; line-height: 1; filter: drop-shadow(0 14px 20px rgba(0,0,0,.45)); }
+.drop2 { animation: pinDrop .7s cubic-bezier(.3,1.5,.5,1) both; }
+.card2 { padding: 24px 50px; text-align: center; }
+.place { font-size: 64px; font-weight: 900; line-height: 1.1; }
+.sub { font-size: 34px; font-weight: 700; opacity: .8; margin-top: 6px; }
+.ring { width: 120px; height: 34px; border-radius: 50%; border: 6px solid var(--accent); margin-top: -40px; animation: ripple 1.4s ease-out .55s both; }
+@keyframes pinDrop { 0% { opacity: 0; transform: translateY(-260px); } 60% { opacity: 1; transform: translateY(10px); } 100% { transform: none; } }
+@keyframes ripple { from { opacity: .9; transform: scale(.4); } to { opacity: 0; transform: scale(2.4); } }</style></head><body><script>function fxBuild(FX, s) {
+  el("div", "pin drop2", "📍", s);
+  el("div", "ring", null, s);
+  const c = el("div", "card2 glass rise", null, s);
+  c.style.animationDelay = ".45s";
+  el("div", "place", FX.title || "Pune", c);
+  if (FX.items[0]) el("div", "sub", FX.items[0], c);
+}</script><script src="_base.js"></script></body></html>

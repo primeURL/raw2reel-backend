@@ -168,3 +168,12 @@ def test_plans_saved_before_effects_still_load():
     old = plan([shot("C1", 0, 3)]).model_dump()
     old.pop("effects")
     assert EditPlan.model_validate(old).effects == []
+
+
+def test_backdrop_word_needs_a_word():
+    p, warnings, _ = validate(fx_plan([
+        {"type": "backdrop_word", "start_s": 1.0, "end_s": 3.0, "text": "   "},
+        {"type": "backdrop_word", "start_s": 4.0, "end_s": 6.0, "text": "a very long backdrop word"},
+    ]), CLIPS, None)
+    assert [e.text for e in p.effects] == ["a very long back"]  # 16 characters max
+    assert any("no word to show" in w for w in warnings)

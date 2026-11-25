@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 
 import AppTabs from '@/components/app-tabs';
+import { Onboarding, useOnboarding } from '@/components/onboarding';
 import { SignIn } from '@/components/sign-in';
 import { Colors } from '@/constants/theme';
 import { SessionProvider, useSession } from '@/lib/session';
@@ -36,9 +37,11 @@ export default function RootLayout() {
 /** Splash until the saved session is checked, then sign-in or the app. */
 function Gate() {
   const { ready, me } = useSession();
+  const intro = useOnboarding();
   useEffect(() => {
-    if (ready) SplashScreen.hideAsync();
-  }, [ready]);
-  if (!ready) return null;
-  return me ? <AppTabs /> : <SignIn />;
+    if (ready && intro.show !== null) SplashScreen.hideAsync();
+  }, [ready, intro.show]);
+  if (!ready || intro.show === null) return null;
+  if (!me) return <SignIn />;
+  return intro.show ? <Onboarding name={me.name} onDone={intro.done} /> : <AppTabs />;
 }

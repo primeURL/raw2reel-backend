@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.panel { width: 100%; padding: 36px 44px; display: flex; flex-direction: column; gap: 24px; }
+.t { font-size: 46px; font-weight: 900; }
+.row { display: flex; align-items: center; gap: 26px; font-size: 42px; font-weight: 700; }
+.box { width: 64px; height: 64px; flex: none; border-radius: 18px; border: 5px solid rgba(255,255,255,.85); position: relative; }
+.box::after { content: ""; position: absolute; inset: -5px; border-radius: 18px; background: var(--accent); transform: scale(0);
+  animation: tick .3s cubic-bezier(.2,1.5,.4,1) both; animation-delay: inherit; }
+.box::before { content: "✓"; position: absolute; inset: 0; display: grid; place-items: center; font-size: 46px; font-weight: 900; z-index: 1; color: var(--on-accent);
+  opacity: 0; animation: fxFade .2s both; animation-delay: inherit; }
+.done { animation: strike .3s both; animation-delay: inherit; }
+@keyframes tick { to { transform: scale(1); } }
+@keyframes strike { to { opacity: .75; } }</style></head><body><script>function fxBuild(FX, s) {
+  const panel = el("div", "panel glass pop", null, s);
+  if (FX.title) el("div", "t", FX.title, panel);
+  const items = (FX.items.length ? FX.items : ["Oats", "Milk", "Banana", "Honey"]).slice(0, 6);
+  items.forEach((it, k) => {
+    const row = el("div", "row rise", null, panel);
+    row.style.animationDelay = 0.1 + k * 0.08 + "s";
+    const box = el("div", "box", null, row);
+    const tickAt = stagger(k, items.length, 0.5, 0.65);
+    box.style.animationDelay = tickAt + "s";
+    const txt = el("span", "done", it, row);
+    txt.style.animationDelay = tickAt + "s";
+  });
+}</script><script src="_base.js"></script></body></html>

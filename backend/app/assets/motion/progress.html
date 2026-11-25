@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><style>.panel { width: 100%; padding: 34px 44px 40px; display: flex; flex-direction: column; gap: 20px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; font-weight: 900; }
+.t { font-size: 48px; }
+.n { font-size: 56px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.track { height: 46px; border-radius: 999px; background: rgba(255,255,255,.22); overflow: hidden; }
+.fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), #fff); transform-origin: left;
+  animation: fill 1.2s cubic-bezier(.3,1,.3,1) .3s both; }
+@keyframes fill { from { transform: scaleX(0); } }</style></head><body><script>let cur = 1, tot = 30, nEl;
+function fxBuild(FX, s) {
+  if (FX.numbers.length >= 2) { cur = FX.numbers[0]; tot = FX.numbers[1]; } else if (FX.numbers.length) cur = FX.numbers[0];
+  const panel = el("div", "panel glass pop", null, s);
+  const top = el("div", "top", null, panel);
+  el("div", "t", FX.title || "Day", top);
+  nEl = el("div", "n", "", top);
+  const fill = el("div", "fill", null, el("div", "track", null, panel));
+  fill.style.width = Math.min(100, Math.max(2, (cur / Math.max(tot, 1)) * 100)) + "%";
+}
+function fxTick(t) {
+  const p = ease((t - 0.3) / 1.2);
+  nEl.textContent = Math.round(cur * p) + " / " + fmt(tot) + (FX.unit ? " " + FX.unit : "");
+}</script><script src="_base.js"></script></body></html>

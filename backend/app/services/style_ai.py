@@ -8,6 +8,7 @@ A second call folds the user's answers back into the profile.
 import base64
 import json
 import logging
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -91,26 +92,37 @@ def _reference_blocks(ref: ReferenceInput) -> list[dict]:
     ]
 
 
+# The SDK's own retries all happen within ~3 s - too quick to ride out a Wi-Fi drop or a server
+# that just changed network. Connection failures get these extra, slower attempts on top.
+CONNECTION_WAITS_S = (5, 15)
+
+
 def _parse(system: str, content: list[dict], output_format, effort: str):
     s = get_settings()
-    try:
-        resp = _client().beta.messages.parse(
-            model=s.anthropic_model,
-            max_tokens=8000,  # a full profile + questions is ~2-3k tokens; cap runaway spend
-            system=system,
-            messages=[{"role": "user", "content": content}],
-            output_format=output_format,
-            output_config={"effort": effort},
-            betas=[FALLBACK_BETA],
-            fallbacks="default",  # on a policy decline, the API retries on a fallback model in the same call
-        )
-    except anthropic.RateLimitError as exc:
-        raise StyleAIError("The AI service is busy right now, please try again in a minute") from exc
-    except anthropic.APIStatusError as exc:
-        log.error("claude error %s: %s", exc.status_code, exc.message)
-        raise StyleAIError(f"The AI service returned an error ({exc.status_code})") from exc
-    except anthropic.APIConnectionError as exc:
-        raise StyleAIError("Couldn't reach the AI service, please try again") from exc
+    for attempt in range(len(CONNECTION_WAITS_S) + 1):
+        try:
+            resp = _client().beta.messages.parse(
+                model=s.anthropic_model,
+                max_tokens=8000,  # a full profile + questions is ~2-3k tokens; cap runaway spend
+                system=system,
+                messages=[{"role": "user", "content": content}],
+                output_format=output_format,
+                output_config={"effort": effort},
+                betas=[FALLBACK_BETA],
+                fallbacks="default",  # on a policy decline, the API retries on a fallback model in the same call
+            )
+            break
+        except anthropic.RateLimitError as exc:
+            raise StyleAIError("The AI service is busy right now, please try again in a minute") from exc
+        except anthropic.APIStatusError as exc:
+            log.error("claude error %s: %s", exc.status_code, exc.message)
+            raise StyleAIError(f"The AI service returned an error ({exc.status_code})") from exc
+        except anthropic.APIConnectionError as exc:  # includes timeouts
+            cause = exc.__cause__ or exc
+            log.warning("claude connection failed (attempt %d): %s: %s", attempt + 1, type(cause).__name__, cause)
+            if attempt == len(CONNECTION_WAITS_S):
+                raise StyleAIError("Couldn't reach the AI service - check the server's internet connection and try again") from exc
+            time.sleep(CONNECTION_WAITS_S[attempt])
 
     if resp.stop_reason == "refusal":
         raise StyleAIError("The AI couldn't analyse these references. Try different reels.")

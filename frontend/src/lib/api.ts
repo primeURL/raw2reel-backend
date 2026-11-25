@@ -4,7 +4,7 @@
  */
 
 import { API_URL } from './config';
-import type { AIUsage, Clip, ClipTicket, EditPlan, Me, Project, ProjectInput, ProjectSummary, Reference, Render, Style, UploadTicket } from './types';
+import type { AIUsage, CaptionLooks, Clip, Lesson, ClipTicket, EditPlan, Me, MotionEffectInfo, MusicLibrary, Project, ProjectInput, ProjectSummary, Reference, Render, Style, Template, UploadTicket } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -64,6 +64,16 @@ export const api = {
   health: () => request<{ status: string }>('GET', '/health', undefined, null),
   me: (token?: string) => request<Me>('GET', '/v1/me', undefined, token ?? getToken()),
   aiUsage: () => request<AIUsage>('GET', '/v1/me/ai-usage'),
+  lessons: () => request<Lesson[]>('GET', '/v1/me/lessons'),
+  addLesson: (text: string, applies_to = 'all') => request<Lesson>('POST', '/v1/me/lessons', { text, applies_to }),
+  updateLesson: (id: string, patch: Partial<Pick<Lesson, 'text' | 'applies_to' | 'active'>>) =>
+    request<Lesson>('PATCH', `/v1/me/lessons/${id}`, patch),
+  forgetLesson: (id: string) => request<void>('DELETE', `/v1/me/lessons/${id}`),
+  music: () => request<MusicLibrary>('GET', '/v1/library/music'),
+  captionLooks: () => request<CaptionLooks>('GET', '/v1/caption-looks'),
+  templates: () => request<Template[]>('GET', '/v1/templates'),
+  motionEffects: () => request<MotionEffectInfo[]>('GET', '/v1/effects/motion'),
+  useTemplate: (id: string) => request<Style>('POST', `/v1/templates/${id}/use`),
   projects: () => request<ProjectSummary[]>('GET', '/v1/projects'),
   project: (id: string) => request<Project>('GET', `/v1/projects/${id}`),
   createProject: (input: ProjectInput) => request<Project>('POST', '/v1/projects', input),
@@ -77,6 +87,8 @@ export const api = {
   deleteClip: (projectId: string, clipId: string) => request<void>('DELETE', `/v1/projects/${projectId}/clips/${clipId}`),
   reorderClips: (projectId: string, clipIds: string[]) => request<Clip[]>('PUT', `/v1/projects/${projectId}/clips/order`, { clip_ids: clipIds }),
   generatePlan: (projectId: string) => request<Project>('POST', `/v1/projects/${projectId}/plan`),
+  /** "Put the oats first", "more sounds"... one AI call; a new preview follows by itself. */
+  revise: (projectId: string, text: string) => request<Project>('POST', `/v1/projects/${projectId}/revise`, { request: text }),
   /** Save the user's edits: checked and auto-fixed on the server, no AI call. */
   savePlan: (projectId: string, plan: EditPlan) => request<Project>('PUT', `/v1/projects/${projectId}/plan`, plan),
   render: (projectId: string, quality: 'preview' | 'final') => request<Render>('POST', `/v1/projects/${projectId}/render`, { quality }),
